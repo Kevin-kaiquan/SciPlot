@@ -1,67 +1,121 @@
 # SciPlot
 
-SciPlot 是一個面向學生、課堂和實驗報告場景的 Windows 本地科研繪圖工具。它不包含模板市場、付費購買、賬號系統或商業追蹤功能。
+SciPlot is a local Windows desktop application for creating publication-ready scientific plots from tabular data. It is designed for students, coursework, lab reports, and lightweight research workflows.
 
-## 功能
+SciPlot does not include a template marketplace, paid templates, accounts, payment features, advertising, or user tracking.
 
-- 導入 CSV、TSV、TXT、Excel 數據。
-- 數據表格預覽。
-- 生成折線圖、散點圖、柱狀圖、誤差棒、直方圖、箱線圖、相關熱圖。
-- 套用免費科研圖模板。
-- 導出 PNG、SVG、PDF。
-- 保存和載入 `.json` 項目文件。
-- 保存、導入、導出本地模板 JSON。
+## Features
 
-## 運行
+- Import CSV, TSV, TXT, XLSX, and XLS data files.
+- Preview imported data in a table.
+- Create line charts, scatter plots, bar charts, error-bar plots, histograms, box plots, and correlation heatmaps.
+- Apply built-in scientific plot templates, including SciPlot Classic.
+- Export figures as PNG, SVG, or PDF.
+- Save and load SciPlot project files as JSON.
+- Import, export, and share local template JSON files.
+- Run fully locally on Windows.
 
-打包完成後直接運行：
+## Project Structure
 
-```powershell
-E:\Sci_Plot\dist\SciPlot\SciPlot.exe
+```text
+src/                         Application source code
+docs/                        User documentation
+sample_data/                 Example input data
+templates/                   Built-in plot templates
+requirements.txt             Python dependencies
+build_exe.ps1                Windows exe build script
+run_dev.ps1                  Development launcher
 ```
 
-這是便攜版資料夾應用。分享給同學時請複製整個 `dist\SciPlot` 文件夾，不要只單獨複製 `SciPlot.exe`。
+Generated folders such as `.venv/`, `build/`, `dist/`, `runtime/`, `exports/`, and `output/` are intentionally ignored by Git.
 
-首次啟動會先顯示「SciPlot 正在啟動」窗口。由於需要載入 Pandas、Matplotlib 等科研繪圖依賴，第一次進入主界面可能需要約 20-40 秒。
+## Run From Source
 
-開發模式運行：
-
-```powershell
-.\run_dev.ps1
-```
-
-## 構建 exe
+First build the local virtual environment and install dependencies:
 
 ```powershell
 .\build_exe.ps1
 ```
 
-腳本會在 `E:\Sci_Plot\.venv` 建立虛擬環境，依賴緩存在 `E:\Sci_Plot\.pip-cache`，構建輸出在 `E:\Sci_Plot\dist`。
-PyInstaller、Matplotlib 和 Python bytecode 的運行/構建緩存也會放在 `E:\Sci_Plot\runtime`。
+Then run the development version:
 
-## 驗證
+```powershell
+.\run_dev.ps1
+```
+
+## Build The Windows App
+
+Run:
+
+```powershell
+.\build_exe.ps1
+```
+
+The script creates a local virtual environment under:
+
+```text
+E:\Sci_Plot\.venv
+```
+
+It also keeps pip, Matplotlib, Python bytecode, and PyInstaller cache files inside the project folder as much as possible.
+
+The packaged application is generated at:
+
+```text
+E:\Sci_Plot\dist\SciPlot\SciPlot.exe
+```
+
+## Portable Distribution
+
+SciPlot is packaged as a portable folder application. To share it with another Windows user, copy the entire folder:
+
+```text
+E:\Sci_Plot\dist\SciPlot
+```
+
+Do not copy only `SciPlot.exe`; the executable needs the `_internal` folder and bundled resources next to it.
+
+On first launch, SciPlot shows a startup window while it loads Pandas, Matplotlib, and other scientific plotting dependencies. The first startup can take around 20 to 40 seconds on some machines.
+
+## Validation
+
+After building the app, run:
 
 ```powershell
 E:\Sci_Plot\dist\SciPlot\SciPlot.exe --smoke-test
 E:\Sci_Plot\dist\SciPlot\SciPlot.exe --gui-smoke
 ```
 
-兩個命令退出碼為 `0` 即表示打包後的繪圖流程和 GUI 初始化通過。
+Both commands should exit with code `0`.
 
-## 數據格式
+## Data Format
 
-第一行應為欄位名稱。數值欄會被自動識別。示例文件在：
+Input files should use the first row as column names. Numeric columns are detected automatically.
+
+Example:
+
+```csv
+time_s,signal_a,signal_b,error_a,group
+0,0.03,0.12,0.02,control
+1,0.18,0.21,0.03,control
+```
+
+An example dataset is available at:
 
 ```text
 sample_data/example_measurements.csv
 ```
 
-## 模板
+## Templates
 
-模板保存在：
+Templates are plain JSON files stored in:
 
 ```text
 templates/
 ```
 
-模板是普通 JSON 文件，可以在同學之間免費共享。
+They can be edited, imported, exported, and shared without any online account or marketplace.
+
+## License
+
+No license has been added yet. Add a license before publishing or distributing the project broadly.
