@@ -1,0 +1,16 @@
+.venv/
+.pip-cache/
+build/
+dist/
+runtime/
+exports/
+output/
+user_data/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+SciPlot.spec
+*.spec~
+.DS_Store
+Thumbs.db

@@ -1,0 +1,14 @@
+{
+  "chart_type": "折線圖",
+  "width": 7.2,
+  "height": 4.2,
+  "dpi": 300,
+  "font_size": 10,
+  "line_width": 1.6,
+  "marker_size": 4.5,
+  "marker": "o",
+  "palette": "SciPlot Classic",
+  "grid": true,
+  "legend": true,
+  "tight_layout": true
+}

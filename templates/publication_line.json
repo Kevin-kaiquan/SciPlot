@@ -1,0 +1,14 @@
+{
+  "chart_type": "折線圖",
+  "width": 7.2,
+  "height": 4.2,
+  "dpi": 300,
+  "font_size": 10,
+  "line_width": 1.8,
+  "marker_size": 5,
+  "marker": "o",
+  "palette": "期刊藍灰",
+  "grid": true,
+  "legend": true,
+  "tight_layout": true
+}

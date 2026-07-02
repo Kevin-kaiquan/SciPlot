@@ -1,0 +1,14 @@
+{
+  "chart_type": "折線圖",
+  "width": 6.9,
+  "height": 4.0,
+  "dpi": 600,
+  "font_size": 9,
+  "line_width": 1.5,
+  "marker_size": 4,
+  "marker": "s",
+  "palette": "單色灰階",
+  "grid": true,
+  "legend": true,
+  "tight_layout": true
+}
