@@ -24,13 +24,16 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import numpy as np
 import pandas as pd
+import matplotlib.tri as mtri
 from matplotlib import rcParams
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
+from matplotlib.patches import Circle
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - required for PyInstaller 3D projection collection
 
 
 APP_NAME = "SciPlot"
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 
 RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", APP_HOME))
 TEMPLATE_DIR = APP_HOME / "templates"
@@ -64,12 +67,45 @@ rcParams["axes.unicode_minus"] = False
 
 CHART_TYPES = {
     "折線圖": "line",
+    "階梯圖": "step",
+    "面積圖": "area",
+    "堆疊面積圖": "stacked_area",
     "散點圖": "scatter",
+    "氣泡圖": "bubble",
     "柱狀圖": "bar",
+    "水平柱狀圖": "barh",
     "誤差棒": "errorbar",
     "直方圖": "histogram",
+    "密度曲線": "density",
+    "累積分布 ECDF": "ecdf",
     "箱線圖": "boxplot",
+    "小提琴圖": "violin",
+    "莖葉圖 Stem": "stem",
+    "棒棒糖圖": "lollipop",
     "相關熱圖": "heatmap",
+    "二維直方圖": "hist2d",
+    "六邊形密度圖": "hexbin",
+    "等高線圖": "contour",
+    "填色等高線圖": "contourf",
+    "雷達圖": "radar",
+    "極坐標折線圖": "polar_line",
+    "極坐標散點圖": "polar_scatter",
+    "餅圖": "pie",
+    "環形圖": "donut",
+    "3D 散點圖": "scatter3d",
+    "3D 折線圖": "line3d",
+    "3D 曲面圖": "surface3d",
+    "3D 網格圖": "wireframe3d",
+    "3D 柱狀圖": "bar3d",
+    "3D 等高線圖": "contour3d",
+}
+
+CHART_GROUPS = {
+    "Core": {"line", "step", "area", "stacked_area", "scatter", "bubble", "bar", "barh", "errorbar"},
+    "Distributions": {"histogram", "density", "ecdf", "boxplot", "violin", "stem", "lollipop"},
+    "Matrices & Density": {"heatmap", "hist2d", "hexbin", "contour", "contourf"},
+    "Polar & Composition": {"radar", "polar_line", "polar_scatter", "pie", "donut"},
+    "3D": {"scatter3d", "line3d", "surface3d", "wireframe3d", "bar3d", "contour3d"},
 }
 
 PALETTES = {
@@ -161,11 +197,15 @@ class PlotSettings:
     chart_type: str = "折線圖"
     x_col: str = ""
     y_cols: list[str] | None = None
+    z_col: str = ""
     error_col: str = ""
     group_col: str = ""
+    size_col: str = ""
+    color_col: str = ""
     title: str = ""
     xlabel: str = ""
     ylabel: str = ""
+    zlabel: str = ""
     width: float = 7.2
     height: float = 4.2
     dpi: int = 300
@@ -177,12 +217,15 @@ class PlotSettings:
     grid: bool = True
     legend: bool = True
     tight_layout: bool = True
+    bins: int = 30
+    elev: int = 28
+    azim: int = -55
 
 
 class ScrollFrame(ttk.Frame):
-    def __init__(self, parent: tk.Widget) -> None:
+    def __init__(self, parent: tk.Widget, width: int = 286) -> None:
         super().__init__(parent)
-        self.canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0)
+        self.canvas = tk.Canvas(self, width=width, highlightthickness=0, borderwidth=0)
         self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
         self.inner = ttk.Frame(self.canvas)
         self.window = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
@@ -226,34 +269,35 @@ class SciPlotApp(tk.Tk):
     def _set_initial_geometry(self) -> None:
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
-        width = min(1080, max(920, screen_w - 240))
-        height = min(720, max(620, screen_h - 180))
-        self.minsize(min(980, width), min(640, height))
+        width = min(1280, max(1080, screen_w - 180))
+        height = min(820, max(700, screen_h - 140))
+        self.minsize(min(1080, width), min(700, height))
         x = 40 if screen_w > width + 80 else max(0, (screen_w - width) // 2)
         y = 40 if screen_h > height + 80 else max(0, (screen_h - height) // 2)
         self.geometry(f"{width}x{height}+{x}+{y}")
 
     def _build_style(self) -> None:
         self.colors = {
-            "app": "#f5f7fb",
+            "app": "#f3f6fb",
             "surface": "#ffffff",
             "surface_2": "#f8fafc",
-            "border": "#dbe3ef",
+            "border": "#d9e2f1",
             "text": "#111827",
-            "muted": "#6b7280",
-            "primary": "#2563eb",
-            "primary_dark": "#1d4ed8",
-            "sidebar": "#0f2347",
-            "sidebar_2": "#15315f",
-            "sidebar_active": "#2f6df6",
+            "muted": "#5f6f85",
+            "primary": "#1f66f2",
+            "primary_dark": "#174fbf",
+            "sidebar": "#0b1833",
+            "sidebar_2": "#132a55",
+            "sidebar_active": "#246bfe",
         }
         self.configure(bg=self.colors["app"])
+        self.option_add("*Font", ("Microsoft YaHei UI", 10))
         style = ttk.Style(self)
         try:
             style.theme_use("clam")
         except tk.TclError:
             pass
-        style.configure(".", font=("Microsoft YaHei UI", 9), background=self.colors["app"])
+        style.configure(".", font=("Microsoft YaHei UI", 10), background=self.colors["app"])
         style.configure("TFrame", background=self.colors["app"])
         style.configure("App.TFrame", background=self.colors["app"])
         style.configure("Surface.TFrame", background=self.colors["surface"])
@@ -261,20 +305,20 @@ class SciPlotApp(tk.Tk):
         style.configure("TLabel", background=self.colors["app"], foreground=self.colors["text"])
         style.configure("Surface.TLabel", background=self.colors["surface"], foreground=self.colors["text"])
         style.configure("Muted.TLabel", background=self.colors["surface"], foreground=self.colors["muted"])
-        style.configure("Hero.TLabel", background=self.colors["app"], foreground=self.colors["text"], font=("Microsoft YaHei UI", 18, "bold"))
-        style.configure("Subhero.TLabel", background=self.colors["app"], foreground=self.colors["muted"], font=("Microsoft YaHei UI", 10))
-        style.configure("CardTitle.TLabel", background=self.colors["surface"], foreground=self.colors["text"], font=("Microsoft YaHei UI", 10, "bold"))
-        style.configure("TButton", padding=(10, 5), background=self.colors["surface"])
-        style.configure("Tool.TButton", padding=(8, 4), background=self.colors["surface"])
-        style.configure("Accent.TButton", padding=(10, 6), foreground="#ffffff", background=self.colors["primary"])
-        style.map("Accent.TButton", background=[("active", "#1d4ed8")])
-        style.configure("Title.TLabel", background=self.colors["surface"], foreground=self.colors["text"], font=("Microsoft YaHei UI", 12, "bold"))
-        style.configure("Status.TLabel", background=self.colors["app"], foreground="#4b5563")
+        style.configure("Hero.TLabel", background=self.colors["app"], foreground=self.colors["text"], font=("Microsoft YaHei UI", 22, "bold"))
+        style.configure("Subhero.TLabel", background=self.colors["app"], foreground=self.colors["muted"], font=("Microsoft YaHei UI", 11))
+        style.configure("CardTitle.TLabel", background=self.colors["surface"], foreground=self.colors["text"], font=("Microsoft YaHei UI", 12, "bold"))
+        style.configure("TButton", padding=(12, 7), background=self.colors["surface"], font=("Microsoft YaHei UI", 10, "bold"))
+        style.configure("Tool.TButton", padding=(10, 7), background=self.colors["surface"], font=("Microsoft YaHei UI", 10, "bold"))
+        style.configure("Accent.TButton", padding=(14, 8), foreground="#ffffff", background=self.colors["primary"], font=("Microsoft YaHei UI", 10, "bold"))
+        style.map("Accent.TButton", background=[("active", self.colors["primary_dark"])])
+        style.configure("Title.TLabel", background=self.colors["surface"], foreground=self.colors["text"], font=("Microsoft YaHei UI", 13, "bold"))
+        style.configure("Status.TLabel", background=self.colors["app"], foreground="#4b5563", font=("Microsoft YaHei UI", 10))
         style.configure("TNotebook", background=self.colors["surface"], borderwidth=0)
-        style.configure("TNotebook.Tab", padding=(14, 7), background="#eef2f7")
+        style.configure("TNotebook.Tab", padding=(16, 9), background="#eef2f7", font=("Microsoft YaHei UI", 10, "bold"))
         style.map("TNotebook.Tab", background=[("selected", "#ffffff")], foreground=[("selected", self.colors["primary"])])
-        style.configure("Treeview", rowheight=25, bordercolor=self.colors["border"], lightcolor=self.colors["border"], darkcolor=self.colors["border"])
-        style.configure("Treeview.Heading", font=("Microsoft YaHei UI", 9, "bold"))
+        style.configure("Treeview", rowheight=29, bordercolor=self.colors["border"], lightcolor=self.colors["border"], darkcolor=self.colors["border"], font=("Microsoft YaHei UI", 10))
+        style.configure("Treeview.Heading", font=("Microsoft YaHei UI", 10, "bold"))
 
     def _build_ui(self) -> None:
         self._build_menu()
@@ -324,7 +368,7 @@ class SciPlotApp(tk.Tk):
         self.navigate("home")
 
     def _build_sidebar(self) -> None:
-        sidebar = tk.Frame(self, bg=self.colors["sidebar"], width=108)
+        sidebar = tk.Frame(self, bg=self.colors["sidebar"], width=128)
         sidebar.grid(row=0, column=0, sticky="ns")
         sidebar.grid_propagate(False)
         sidebar.columnconfigure(0, weight=1)
@@ -334,8 +378,8 @@ class SciPlotApp(tk.Tk):
             text="SciPlot",
             bg=self.colors["sidebar"],
             fg="#ffffff",
-            font=("Microsoft YaHei UI", 11, "bold"),
-            pady=18,
+            font=("Microsoft YaHei UI", 13, "bold"),
+            pady=22,
         )
         brand.grid(row=0, column=0, sticky="ew")
 
@@ -350,7 +394,7 @@ class SciPlotApp(tk.Tk):
         ]
         for row, (key, label) in enumerate(nav_items, start=1):
             self._sidebar_button(sidebar, key, label).grid(row=row, column=0, sticky="ew", padx=10, pady=4)
-        tk.Label(sidebar, text="就緒", bg=self.colors["sidebar"], fg="#b9c7df", font=("Microsoft YaHei UI", 8)).grid(
+        tk.Label(sidebar, text="Ready", bg=self.colors["sidebar"], fg="#b9c7df", font=("Microsoft YaHei UI", 9)).grid(
             row=99, column=0, sticky="sew", padx=12, pady=12
         )
         sidebar.rowconfigure(98, weight=1)
@@ -367,8 +411,8 @@ class SciPlotApp(tk.Tk):
             relief="flat",
             borderwidth=0,
             padx=14,
-            pady=10,
-            font=("Microsoft YaHei UI", 9, "bold" if key == "home" else "normal"),
+            pady=12,
+            font=("Microsoft YaHei UI", 11, "bold" if key == "home" else "normal"),
             command=lambda item=key: self.navigate(item),
         )
         self.nav_buttons[key] = button
@@ -380,7 +424,7 @@ class SciPlotApp(tk.Tk):
             button.configure(
                 bg=self.colors["sidebar_active"] if active else self.colors["sidebar"],
                 fg="#ffffff" if active else "#dbeafe",
-                font=("Microsoft YaHei UI", 9, "bold" if active else "normal"),
+                font=("Microsoft YaHei UI", 11, "bold" if active else "normal"),
             )
 
     def navigate(self, key: str) -> None:
@@ -423,8 +467,8 @@ class SciPlotApp(tk.Tk):
         actions = [
             ("導入數據", "CSV、TSV、TXT、Excel", self.open_data),
             ("新建圖表", "從示例或當前數據開始", lambda: self.navigate("plot")),
-            ("打開項目", "載入已保存的項目文件", self.load_project),
-            ("導入模板", "使用同學共享的 JSON 模板", self.import_template),
+            ("高級圖表", "3D、密度、極坐標、統計分布", lambda: self.navigate("plot")),
+            ("導入模板", "使用共享的 JSON 模板", self.import_template),
         ]
         for index, (title, desc, command) in enumerate(actions):
             row = index // 2
@@ -433,33 +477,33 @@ class SciPlotApp(tk.Tk):
             card.grid(row=row, column=col, sticky="nsew", padx=(0 if col == 0 else 8, 0 if col == 1 else 8), pady=(0, 14))
 
         recent_projects = self._home_list_panel(parent, "最近項目")
-        recent_projects.grid(row=2, column=0, sticky="nsew", padx=(0, 8))
+        recent_projects.grid(row=2, column=0, sticky="nsew", padx=(0, 8), pady=(2, 0))
         self.recent_projects_frame = recent_projects.body
 
         recent_files = self._home_list_panel(parent, "最近文件")
-        recent_files.grid(row=2, column=1, sticky="nsew", padx=(8, 0))
+        recent_files.grid(row=2, column=1, sticky="nsew", padx=(8, 0), pady=(2, 0))
         self.recent_files_frame = recent_files.body
 
     def _home_action_card(self, parent: ttk.Frame, title: str, description: str, command: Any) -> tk.Frame:
         card = tk.Frame(parent, bg=self.colors["surface"], highlightthickness=1, highlightbackground=self.colors["border"])
-        card.configure(width=230, height=148)
+        card.configure(width=260, height=158)
         card.grid_propagate(False)
         card.columnconfigure(0, weight=1)
-        tk.Label(card, text=title, bg=self.colors["surface"], fg=self.colors["text"], font=("Microsoft YaHei UI", 11, "bold")).grid(
-            row=0, column=0, sticky="w", padx=18, pady=(18, 4)
+        tk.Label(card, text=title, bg=self.colors["surface"], fg=self.colors["text"], font=("Microsoft YaHei UI", 13, "bold")).grid(
+            row=0, column=0, sticky="w", padx=20, pady=(20, 5)
         )
         tk.Label(
             card,
             text=description,
             bg=self.colors["surface"],
             fg=self.colors["muted"],
-            font=("Microsoft YaHei UI", 9),
-            wraplength=185,
+            font=("Microsoft YaHei UI", 10),
+            wraplength=230,
             justify="left",
         ).grid(
-            row=1, column=0, sticky="w", padx=18
+            row=1, column=0, sticky="w", padx=20
         )
-        ttk.Button(card, text="開始", style="Tool.TButton", command=command).grid(row=2, column=0, sticky="ew", padx=18, pady=(16, 18))
+        ttk.Button(card, text="開始", style="Tool.TButton", command=command).grid(row=2, column=0, sticky="ew", padx=20, pady=(18, 18))
         return card
 
     def _home_list_panel(self, parent: ttk.Frame, title: str) -> tk.Frame:
@@ -491,9 +535,9 @@ class SciPlotApp(tk.Tk):
         paned = ttk.PanedWindow(parent, orient="horizontal")
         paned.grid(row=1, column=0, sticky="nsew")
 
-        left = ttk.Frame(paned, width=310, style="Surface.TFrame")
+        left = ttk.Frame(paned, width=292, style="Surface.TFrame")
         center = ttk.Frame(paned, style="Surface.TFrame")
-        right = ttk.Frame(paned, width=300, style="Surface.TFrame")
+        right = ttk.Frame(paned, width=276, style="Surface.TFrame")
         paned.add(left, weight=0)
         paned.add(center, weight=1)
         paned.add(right, weight=0)
@@ -587,8 +631,8 @@ class SciPlotApp(tk.Tk):
         notebook.grid(row=0, column=0, sticky="nsew")
         self.controls_notebook = notebook
 
-        data_tab = ScrollFrame(notebook)
-        plot_tab = ScrollFrame(notebook)
+        data_tab = ScrollFrame(notebook, width=286)
+        plot_tab = ScrollFrame(notebook, width=286)
 
         notebook.add(data_tab, text="數據")
         notebook.add(plot_tab, text="繪圖")
@@ -601,8 +645,8 @@ class SciPlotApp(tk.Tk):
         notebook.grid(row=0, column=0, sticky="nsew")
         self.side_settings_notebook = notebook
 
-        style_tab = ScrollFrame(notebook)
-        template_tab = ScrollFrame(notebook)
+        style_tab = ScrollFrame(notebook, width=270)
+        template_tab = ScrollFrame(notebook, width=270)
         notebook.add(style_tab, text="樣式")
         notebook.add(template_tab, text="模板")
 
@@ -653,6 +697,18 @@ class SciPlotApp(tk.Tk):
         self.error_combo = self._combo(parent, "誤差欄位", self.error_col_var, [], row)
         row += 2
 
+        self.z_col_var = tk.StringVar()
+        self.z_combo = self._combo(parent, "Z 軸 / 強度欄位", self.z_col_var, [], row)
+        row += 2
+
+        self.size_col_var = tk.StringVar()
+        self.size_combo = self._combo(parent, "點大小欄位", self.size_col_var, [], row)
+        row += 2
+
+        self.color_col_var = tk.StringVar()
+        self.color_combo = self._combo(parent, "顏色映射欄位", self.color_col_var, [], row)
+        row += 2
+
         self.group_col_var = tk.StringVar()
         self.group_combo = self._combo(parent, "分組欄位", self.group_col_var, [], row)
         row += 2
@@ -665,6 +721,9 @@ class SciPlotApp(tk.Tk):
         row += 2
         self.ylabel_var = tk.StringVar()
         self._entry(parent, "Y 軸標籤", self.ylabel_var, row)
+        row += 2
+        self.zlabel_var = tk.StringVar()
+        self._entry(parent, "Z 軸標籤", self.zlabel_var, row)
         row += 2
 
         ttk.Button(parent, text="生成 / 更新圖表", style="Accent.TButton", command=self.render_plot).grid(
@@ -694,6 +753,18 @@ class SciPlotApp(tk.Tk):
         row += 2
         self.marker_size_var = tk.DoubleVar(value=self.current_settings.marker_size)
         self._spin(parent, "標記大小", self.marker_size_var, 0.0, 18.0, 0.5, row)
+        row += 2
+
+        self.bins_var = tk.IntVar(value=self.current_settings.bins)
+        self._spin(parent, "分箱 / 網格密度", self.bins_var, 5, 120, 1, row)
+        row += 2
+
+        self.elev_var = tk.IntVar(value=self.current_settings.elev)
+        self._spin(parent, "3D 仰角", self.elev_var, -90, 90, 1, row)
+        row += 2
+
+        self.azim_var = tk.IntVar(value=self.current_settings.azim)
+        self._spin(parent, "3D 方位角", self.azim_var, -180, 180, 1, row)
         row += 2
 
         self.marker_var = tk.StringVar(value=self.current_settings.marker)
@@ -797,6 +868,8 @@ class SciPlotApp(tk.Tk):
             numeric_cols = self.numeric_columns()
             if "time_s" in self.df.columns:
                 self.x_col_var.set("time_s")
+            if "temperature_c" in self.df.columns:
+                self.z_col_var.set("temperature_c")
             if "group" in self.df.columns:
                 self.group_col_var.set("group")
             if numeric_cols:
@@ -884,9 +957,14 @@ class SciPlotApp(tk.Tk):
         numeric_cols = self.numeric_columns()
         self.x_combo.configure(values=columns)
         self.error_combo.configure(values=[""] + numeric_cols)
+        self.z_combo.configure(values=[""] + numeric_cols)
+        self.size_combo.configure(values=[""] + numeric_cols)
+        self.color_combo.configure(values=[""] + numeric_cols)
         self.group_combo.configure(values=columns)
         if not self.x_col_var.get() and self.df.columns.size:
             self.x_col_var.set(str(self.df.columns[0]))
+        if not self.z_col_var.get() and len(numeric_cols) > 2:
+            self.z_col_var.set(numeric_cols[2])
 
         self.y_listbox.delete(0, "end")
         for col in numeric_cols:
@@ -937,11 +1015,15 @@ class SciPlotApp(tk.Tk):
             chart_type=self.chart_type_var.get(),
             x_col=self.x_col_var.get(),
             y_cols=self.selected_y_columns(),
+            z_col=self.z_col_var.get(),
             error_col=self.error_col_var.get(),
             group_col=self.group_col_var.get(),
+            size_col=self.size_col_var.get(),
+            color_col=self.color_col_var.get(),
             title=self.title_var.get(),
             xlabel=self.xlabel_var.get(),
             ylabel=self.ylabel_var.get(),
+            zlabel=self.zlabel_var.get(),
             width=self._float_var(self.width_var, 7.2, 2.0, 16.0),
             height=self._float_var(self.height_var, 4.2, 2.0, 12.0),
             dpi=self._int_var(self.dpi_var, 300, 72, 1200),
@@ -953,6 +1035,9 @@ class SciPlotApp(tk.Tk):
             grid=bool(self.grid_var.get()),
             legend=bool(self.legend_var.get()),
             tight_layout=bool(self.tight_layout_var.get()),
+            bins=self._int_var(self.bins_var, 30, 5, 120),
+            elev=self._int_var(self.elev_var, 28, -90, 90),
+            azim=self._int_var(self.azim_var, -55, -180, 180),
         )
 
     def _float_var(self, variable: tk.Variable, fallback: float, minimum: float, maximum: float) -> float:
@@ -982,18 +1067,29 @@ class SciPlotApp(tk.Tk):
             return
         settings = self.collect_settings()
         chart_key = CHART_TYPES.get(settings.chart_type, "line")
-        if chart_key not in {"histogram", "boxplot", "heatmap"} and not settings.x_col:
+        no_x_required = {"histogram", "density", "ecdf", "boxplot", "violin", "heatmap", "radar", "pie", "donut"}
+        y_optional = {"heatmap", "pie", "donut"}
+        z_required = {"scatter3d", "line3d", "surface3d", "wireframe3d", "bar3d", "contour3d", "contour", "contourf"}
+        if chart_key not in no_x_required and not settings.x_col:
             messagebox.showwarning("缺少 X 軸", "請選擇 X 軸欄位。")
             return
-        if chart_key != "heatmap" and not settings.y_cols:
+        if chart_key not in y_optional and not settings.y_cols:
             messagebox.showwarning("缺少 Y 軸", "請至少選擇一個 Y 軸欄位。")
+            return
+        if chart_key in z_required and not settings.z_col:
+            messagebox.showwarning("缺少 Z 軸", "此圖表需要選擇 Z 軸 / 強度欄位。")
             return
 
         try:
             self.current_settings = settings
             preview_dpi = min(settings.dpi, 150)
             fig = Figure(figsize=(settings.width, settings.height), dpi=preview_dpi)
-            ax = fig.add_subplot(111)
+            if chart_key in {"scatter3d", "line3d", "surface3d", "wireframe3d", "bar3d", "contour3d"}:
+                ax = fig.add_subplot(111, projection="3d")
+            elif chart_key in {"radar", "polar_line", "polar_scatter"}:
+                ax = fig.add_subplot(111, projection="polar")
+            else:
+                ax = fig.add_subplot(111)
             fig.patch.set_facecolor("#ffffff")
             ax.set_facecolor("#ffffff")
 
@@ -1009,23 +1105,82 @@ class SciPlotApp(tk.Tk):
     def _plot_by_type(self, ax: Any, chart_key: str, settings: PlotSettings, colors: list[str]) -> None:
         if chart_key == "line":
             self._plot_xy(ax, settings, colors, mode="line")
+        elif chart_key == "step":
+            self._plot_xy(ax, settings, colors, mode="step")
+        elif chart_key == "area":
+            self._plot_area(ax, settings, colors, stacked=False)
+        elif chart_key == "stacked_area":
+            self._plot_area(ax, settings, colors, stacked=True)
         elif chart_key == "scatter":
             self._plot_xy(ax, settings, colors, mode="scatter")
+        elif chart_key == "bubble":
+            self._plot_bubble(ax, settings, colors)
         elif chart_key == "bar":
             self._plot_bar(ax, settings, colors)
+        elif chart_key == "barh":
+            self._plot_barh(ax, settings, colors)
         elif chart_key == "errorbar":
             self._plot_errorbar(ax, settings, colors)
         elif chart_key == "histogram":
             self._plot_histogram(ax, settings, colors)
+        elif chart_key == "density":
+            self._plot_density(ax, settings, colors)
+        elif chart_key == "ecdf":
+            self._plot_ecdf(ax, settings, colors)
         elif chart_key == "boxplot":
             self._plot_boxplot(ax, settings, colors)
+        elif chart_key == "violin":
+            self._plot_violin(ax, settings, colors)
+        elif chart_key == "stem":
+            self._plot_stem(ax, settings, colors)
+        elif chart_key == "lollipop":
+            self._plot_lollipop(ax, settings, colors)
         elif chart_key == "heatmap":
             self._plot_heatmap(ax, settings)
+        elif chart_key == "hist2d":
+            self._plot_hist2d(ax, settings)
+        elif chart_key == "hexbin":
+            self._plot_hexbin(ax, settings)
+        elif chart_key in {"contour", "contourf"}:
+            self._plot_contour(ax, settings, filled=chart_key == "contourf")
+        elif chart_key == "radar":
+            self._plot_radar(ax, settings, colors)
+        elif chart_key == "polar_line":
+            self._plot_polar(ax, settings, colors, mode="line")
+        elif chart_key == "polar_scatter":
+            self._plot_polar(ax, settings, colors, mode="scatter")
+        elif chart_key in {"pie", "donut"}:
+            self._plot_pie(ax, settings, colors, donut=chart_key == "donut")
+        elif chart_key in {"scatter3d", "line3d", "surface3d", "wireframe3d", "bar3d", "contour3d"}:
+            self._plot_3d(ax, settings, colors, chart_key)
         else:
             self._plot_xy(ax, settings, colors, mode="line")
 
     def _numeric_series(self, col: str) -> pd.Series:
         return pd.to_numeric(self.df[col], errors="coerce")
+
+    def _numeric_frame(self, cols: list[str]) -> pd.DataFrame:
+        return self.df[cols].apply(pd.to_numeric, errors="coerce").dropna()
+
+    def _scaled_sizes(self, settings: PlotSettings, default: float = 40.0) -> pd.Series | float:
+        if not settings.size_col:
+            return max(default, settings.marker_size**2)
+        values = self._numeric_series(settings.size_col)
+        minimum = values.min(skipna=True)
+        maximum = values.max(skipna=True)
+        if pd.isna(minimum) or pd.isna(maximum) or maximum == minimum:
+            return pd.Series(default, index=values.index)
+        return 25 + (values - minimum) / (maximum - minimum) * 220
+
+    def _color_values(self, settings: PlotSettings) -> pd.Series | None:
+        if not settings.color_col:
+            return None
+        values = self._numeric_series(settings.color_col)
+        return values if values.notna().sum() else None
+
+    def _add_colorbar(self, ax: Any, artist: Any, label: str = "") -> None:
+        if hasattr(ax, "figure") and artist is not None:
+            ax.figure.colorbar(artist, ax=ax, fraction=0.046, pad=0.04, label=label)
 
     def _plot_xy(self, ax: Any, settings: PlotSettings, colors: list[str], mode: str) -> None:
         x_raw = self.df[settings.x_col]
@@ -1052,6 +1207,15 @@ class SciPlotApp(tk.Tk):
                             marker=settings.marker or None,
                             markersize=settings.marker_size,
                         )
+                    elif mode == "step":
+                        ax.step(
+                            x_values,
+                            y_values,
+                            label=label,
+                            color=color,
+                            linewidth=settings.line_width,
+                            where="mid",
+                        )
                     else:
                         ax.scatter(x_values, y_values, label=label, color=color, s=settings.marker_size**2)
             return
@@ -1069,8 +1233,43 @@ class SciPlotApp(tk.Tk):
                     marker=settings.marker or None,
                     markersize=settings.marker_size,
                 )
+            elif mode == "step":
+                ax.step(x, y, label=y_col, color=color, linewidth=settings.line_width, where="mid")
             else:
                 ax.scatter(x, y, label=y_col, color=color, s=settings.marker_size**2)
+
+    def _plot_area(self, ax: Any, settings: PlotSettings, colors: list[str], stacked: bool) -> None:
+        x = self.df[settings.x_col]
+        y_cols = settings.y_cols or []
+        y_data = [self._numeric_series(col).fillna(0).to_numpy() for col in y_cols]
+        if stacked and len(y_data) > 1:
+            ax.stackplot(x, y_data, labels=y_cols, colors=colors[: len(y_cols)], alpha=0.82)
+            return
+        for index, (y_col, y) in enumerate(zip(y_cols, y_data)):
+            color = colors[index % len(colors)]
+            ax.plot(x, y, label=y_col, color=color, linewidth=settings.line_width)
+            ax.fill_between(x, y, alpha=0.22, color=color)
+
+    def _plot_bubble(self, ax: Any, settings: PlotSettings, colors: list[str]) -> None:
+        y_col = (settings.y_cols or [""])[0]
+        frame = self._numeric_frame([settings.x_col, y_col] + ([settings.size_col] if settings.size_col else []) + ([settings.color_col] if settings.color_col else []))
+        c = frame[settings.color_col] if settings.color_col and settings.color_col in frame else None
+        sizes = self._scaled_sizes(settings)
+        if isinstance(sizes, pd.Series):
+            sizes = sizes.reindex(frame.index).fillna(40)
+        scatter_kwargs = {"c": c, "cmap": "viridis"} if c is not None else {"color": colors[0]}
+        artist = ax.scatter(
+            frame[settings.x_col],
+            frame[y_col],
+            s=sizes,
+            alpha=0.72,
+            edgecolors="#ffffff",
+            linewidths=0.6,
+            label=y_col,
+            **scatter_kwargs,
+        )
+        if c is not None:
+            self._add_colorbar(ax, artist, settings.color_col)
 
     def _plot_bar(self, ax: Any, settings: PlotSettings, colors: list[str]) -> None:
         x = self.df[settings.x_col].astype(str)
@@ -1083,6 +1282,19 @@ class SciPlotApp(tk.Tk):
             ax.bar(indices + offset, y, width=width, label=y_col, color=colors[idx % len(colors)])
         ax.set_xticks(indices)
         ax.set_xticklabels(x, rotation=30, ha="right")
+
+    def _plot_barh(self, ax: Any, settings: PlotSettings, colors: list[str]) -> None:
+        labels = self.df[settings.x_col].astype(str)
+        y_cols = settings.y_cols or []
+        indices = np.arange(len(labels))
+        height = min(0.8 / max(len(y_cols), 1), 0.35)
+        for idx, y_col in enumerate(y_cols):
+            values = self._numeric_series(y_col)
+            offset = (idx - (len(y_cols) - 1) / 2) * height
+            ax.barh(indices + offset, values, height=height, label=y_col, color=colors[idx % len(colors)])
+        ax.set_yticks(indices)
+        ax.set_yticklabels(labels)
+        ax.invert_yaxis()
 
     def _plot_errorbar(self, ax: Any, settings: PlotSettings, colors: list[str]) -> None:
         y_col = (settings.y_cols or [""])[0]
@@ -1106,7 +1318,29 @@ class SciPlotApp(tk.Tk):
     def _plot_histogram(self, ax: Any, settings: PlotSettings, colors: list[str]) -> None:
         for index, y_col in enumerate(settings.y_cols or []):
             values = self._numeric_series(y_col).dropna()
-            ax.hist(values, bins="auto", alpha=0.65, label=y_col, color=colors[index % len(colors)])
+            ax.hist(values, bins=settings.bins, alpha=0.65, label=y_col, color=colors[index % len(colors)])
+
+    def _plot_density(self, ax: Any, settings: PlotSettings, colors: list[str]) -> None:
+        for index, y_col in enumerate(settings.y_cols or []):
+            values = self._numeric_series(y_col).dropna()
+            if values.empty:
+                continue
+            counts, edges = np.histogram(values, bins=settings.bins, density=True)
+            centers = (edges[:-1] + edges[1:]) / 2
+            if len(counts) >= 5:
+                kernel = np.ones(5) / 5
+                counts = np.convolve(counts, kernel, mode="same")
+            color = colors[index % len(colors)]
+            ax.plot(centers, counts, label=y_col, color=color, linewidth=settings.line_width)
+            ax.fill_between(centers, counts, color=color, alpha=0.18)
+
+    def _plot_ecdf(self, ax: Any, settings: PlotSettings, colors: list[str]) -> None:
+        for index, y_col in enumerate(settings.y_cols or []):
+            values = np.sort(self._numeric_series(y_col).dropna().to_numpy())
+            if values.size == 0:
+                continue
+            y = np.arange(1, values.size + 1) / values.size
+            ax.step(values, y, where="post", label=y_col, color=colors[index % len(colors)], linewidth=settings.line_width)
 
     def _plot_boxplot(self, ax: Any, settings: PlotSettings, colors: list[str]) -> None:
         y_cols = settings.y_cols or []
@@ -1115,6 +1349,37 @@ class SciPlotApp(tk.Tk):
         for patch, color in zip(box["boxes"], colors * max(1, len(y_cols))):
             patch.set_facecolor(color)
             patch.set_alpha(0.6)
+
+    def _plot_violin(self, ax: Any, settings: PlotSettings, colors: list[str]) -> None:
+        y_cols = settings.y_cols or []
+        data = [self._numeric_series(col).dropna() for col in y_cols]
+        violin = ax.violinplot(data, showmeans=True, showextrema=True)
+        for index, body in enumerate(violin["bodies"]):
+            body.set_facecolor(colors[index % len(colors)])
+            body.set_edgecolor("#374151")
+            body.set_alpha(0.55)
+        ax.set_xticks(range(1, len(y_cols) + 1))
+        ax.set_xticklabels(y_cols, rotation=20, ha="right")
+
+    def _plot_stem(self, ax: Any, settings: PlotSettings, colors: list[str]) -> None:
+        x = self._numeric_series(settings.x_col)
+        for index, y_col in enumerate(settings.y_cols or []):
+            markerline, stemlines, baseline = ax.stem(x, self._numeric_series(y_col), label=y_col)
+            color = colors[index % len(colors)]
+            markerline.set_color(color)
+            stemlines.set_color(color)
+            baseline.set_color("#9ca3af")
+
+    def _plot_lollipop(self, ax: Any, settings: PlotSettings, colors: list[str]) -> None:
+        x = self.df[settings.x_col].astype(str)
+        indices = np.arange(len(x))
+        for index, y_col in enumerate(settings.y_cols or []):
+            y = self._numeric_series(y_col)
+            color = colors[index % len(colors)]
+            ax.vlines(indices, 0, y, color=color, alpha=0.7, linewidth=settings.line_width)
+            ax.scatter(indices, y, color=color, s=max(30, settings.marker_size**2), label=y_col, zorder=3)
+        ax.set_xticks(indices)
+        ax.set_xticklabels(x, rotation=30, ha="right")
 
     def _plot_heatmap(self, ax: Any, settings: PlotSettings) -> None:
         numeric_cols = settings.y_cols or self.numeric_columns()
@@ -1131,24 +1396,131 @@ class SciPlotApp(tk.Tk):
                 ax.text(j, i, f"{corr.values[i, j]:.2f}", ha="center", va="center", fontsize=max(7, settings.font_size - 2))
         self.figure_colorbar = image
 
+    def _plot_hist2d(self, ax: Any, settings: PlotSettings) -> None:
+        y_col = (settings.y_cols or [""])[0]
+        frame = self._numeric_frame([settings.x_col, y_col])
+        image = ax.hist2d(frame[settings.x_col], frame[y_col], bins=settings.bins, cmap="viridis")
+        self._add_colorbar(ax, image[3], "Count")
+
+    def _plot_hexbin(self, ax: Any, settings: PlotSettings) -> None:
+        y_col = (settings.y_cols or [""])[0]
+        frame = self._numeric_frame([settings.x_col, y_col])
+        artist = ax.hexbin(frame[settings.x_col], frame[y_col], gridsize=settings.bins, cmap="viridis", mincnt=1)
+        self._add_colorbar(ax, artist, "Count")
+
+    def _plot_contour(self, ax: Any, settings: PlotSettings, filled: bool) -> None:
+        y_col = (settings.y_cols or [""])[0]
+        frame = self._numeric_frame([settings.x_col, y_col, settings.z_col])
+        if len(frame) < 3:
+            raise ValueError("等高線圖至少需要三個有效數據點。")
+        triangulation = mtri.Triangulation(frame[settings.x_col], frame[y_col])
+        if filled:
+            artist = ax.tricontourf(triangulation, frame[settings.z_col], levels=min(settings.bins, 40), cmap="viridis")
+        else:
+            artist = ax.tricontour(triangulation, frame[settings.z_col], levels=min(settings.bins, 40), cmap="viridis", linewidths=1.0)
+            ax.clabel(artist, inline=True, fontsize=max(7, settings.font_size - 2))
+        self._add_colorbar(ax, artist, settings.z_col)
+
+    def _plot_radar(self, ax: Any, settings: PlotSettings, colors: list[str]) -> None:
+        y_cols = settings.y_cols or []
+        if len(y_cols) < 3:
+            raise ValueError("雷達圖至少需要三個 Y 欄位。")
+        values = [self._numeric_series(col).mean(skipna=True) for col in y_cols]
+        angles = np.linspace(0, 2 * np.pi, len(y_cols), endpoint=False).tolist()
+        values += values[:1]
+        angles += angles[:1]
+        ax.plot(angles, values, color=colors[0], linewidth=settings.line_width, marker=settings.marker or "o")
+        ax.fill(angles, values, color=colors[0], alpha=0.18)
+        ax.set_xticks(angles[:-1])
+        ax.set_xticklabels(y_cols)
+
+    def _plot_polar(self, ax: Any, settings: PlotSettings, colors: list[str], mode: str) -> None:
+        theta = self._numeric_series(settings.x_col)
+        for index, y_col in enumerate(settings.y_cols or []):
+            radius = self._numeric_series(y_col)
+            color = colors[index % len(colors)]
+            if mode == "line":
+                ax.plot(theta, radius, label=y_col, color=color, linewidth=settings.line_width, marker=settings.marker or None)
+            else:
+                ax.scatter(theta, radius, label=y_col, color=color, s=max(20, settings.marker_size**2))
+
+    def _plot_pie(self, ax: Any, settings: PlotSettings, colors: list[str], donut: bool) -> None:
+        y_col = (settings.y_cols or [self.numeric_columns()[0]])[0]
+        values = self._numeric_series(y_col).dropna()
+        if settings.x_col:
+            labels = self.df.loc[values.index, settings.x_col].astype(str)
+        else:
+            labels = [str(i + 1) for i in range(len(values))]
+        ax.pie(values, labels=labels, autopct="%1.1f%%", colors=colors * max(1, len(values)), startangle=90)
+        if donut:
+            ax.add_artist(Circle((0, 0), 0.58, fc="white"))
+        ax.axis("equal")
+
+    def _plot_3d(self, ax: Any, settings: PlotSettings, colors: list[str], chart_key: str) -> None:
+        y_col = (settings.y_cols or [""])[0]
+        frame = self._numeric_frame([settings.x_col, y_col, settings.z_col])
+        x = frame[settings.x_col]
+        y = frame[y_col]
+        z = frame[settings.z_col]
+        ax.view_init(elev=settings.elev, azim=settings.azim)
+        if chart_key == "scatter3d":
+            c = self._color_values(settings)
+            c = c.reindex(frame.index) if isinstance(c, pd.Series) else z
+            artist = ax.scatter(x, y, z, c=c, cmap="viridis", s=max(25, settings.marker_size**2), depthshade=True)
+            self._add_colorbar(ax, artist, settings.color_col or settings.z_col)
+        elif chart_key == "line3d":
+            ax.plot(x, y, z, color=colors[0], linewidth=settings.line_width, marker=settings.marker or None, label=y_col)
+        elif chart_key in {"surface3d", "wireframe3d", "contour3d"}:
+            triangulation = mtri.Triangulation(x, y)
+            if chart_key == "surface3d":
+                artist = ax.plot_trisurf(triangulation, z, cmap="viridis", alpha=0.88, linewidth=0.25)
+                self._add_colorbar(ax, artist, settings.z_col)
+            elif chart_key == "wireframe3d":
+                ax.plot_trisurf(triangulation, z, color=colors[0], alpha=0.18, edgecolor=colors[0], linewidth=0.7)
+            else:
+                ax.tricontour(triangulation, z, levels=min(settings.bins, 35), cmap="viridis")
+        elif chart_key == "bar3d":
+            dx = dy = np.full(len(frame), 0.45)
+            z_base = np.zeros(len(frame))
+            ax.bar3d(x, y, z_base, dx, dy, z, color=colors[0], alpha=0.72, shade=True)
+
     def _decorate_axes(self, ax: Any, fig: Figure, settings: PlotSettings, chart_key: str) -> None:
         ax.set_title(settings.title, fontsize=settings.font_size + 2, pad=12)
-        if chart_key != "heatmap":
+        if chart_key in {"scatter3d", "line3d", "surface3d", "wireframe3d", "bar3d", "contour3d"}:
             ax.set_xlabel(settings.xlabel or settings.x_col)
             ax.set_ylabel(settings.ylabel or ", ".join(settings.y_cols or []))
-        if settings.grid and chart_key != "heatmap":
+            ax.set_zlabel(settings.zlabel or settings.z_col)
+        elif chart_key not in {"heatmap", "radar", "polar_line", "polar_scatter", "pie", "donut"}:
+            ax.set_xlabel(settings.xlabel or settings.x_col)
+            ax.set_ylabel(settings.ylabel or ", ".join(settings.y_cols or []))
+        if settings.grid and chart_key not in {"heatmap", "pie", "donut"}:
             ax.grid(True, color="#d1d5db", linewidth=0.7, alpha=0.75)
-        if settings.legend and chart_key not in {"heatmap"}:
+        bottom_legend = False
+        if settings.legend and chart_key not in {"heatmap", "pie", "donut"}:
             handles, labels = ax.get_legend_handles_labels()
             if handles and labels:
-                ax.legend(frameon=False)
+                bottom_legend = chart_key not in {"radar", "polar_line", "polar_scatter"} and len(labels) >= 3
+                if bottom_legend:
+                    ax.legend(
+                        frameon=False,
+                        loc="upper center",
+                        bbox_to_anchor=(0.5, -0.16),
+                        borderaxespad=0,
+                        ncol=min(2, len(labels)),
+                        fontsize=max(8, settings.font_size - 1),
+                    )
+                else:
+                    ax.legend(frameon=False)
         if chart_key == "heatmap" and hasattr(self, "figure_colorbar"):
             fig.colorbar(self.figure_colorbar, ax=ax, fraction=0.046, pad=0.04, label="Pearson r")
-        for spine in ax.spines.values():
-            spine.set_color("#374151")
-            spine.set_linewidth(0.8)
+        if hasattr(ax, "spines"):
+            for spine in ax.spines.values():
+                spine.set_color("#374151")
+                spine.set_linewidth(0.8)
         if settings.tight_layout:
             fig.tight_layout()
+        if bottom_legend:
+            fig.subplots_adjust(bottom=0.24)
 
     def _show_figure(self, fig: Figure) -> None:
         for child in self.plot_container.winfo_children():
@@ -1189,6 +1561,12 @@ class SciPlotApp(tk.Tk):
         self.grid_var.set(bool(template.get("grid", self.grid_var.get())))
         self.legend_var.set(bool(template.get("legend", self.legend_var.get())))
         self.tight_layout_var.set(bool(template.get("tight_layout", self.tight_layout_var.get())))
+        if hasattr(self, "bins_var"):
+            self.bins_var.set(int(template.get("bins", self.bins_var.get())))
+        if hasattr(self, "elev_var"):
+            self.elev_var.set(int(template.get("elev", self.elev_var.get())))
+        if hasattr(self, "azim_var"):
+            self.azim_var.set(int(template.get("azim", self.azim_var.get())))
 
     def save_current_template(self) -> None:
         name = simpledialog.askstring("保存模板", "模板名稱：", parent=self)
@@ -1200,13 +1578,8 @@ class SciPlotApp(tk.Tk):
             return
         path = TEMPLATE_DIR / f"{safe_name}.json"
         template = asdict(self.collect_settings())
-        template.pop("x_col", None)
-        template.pop("y_cols", None)
-        template.pop("error_col", None)
-        template.pop("group_col", None)
-        template.pop("title", None)
-        template.pop("xlabel", None)
-        template.pop("ylabel", None)
+        for key in ("x_col", "y_cols", "z_col", "error_col", "group_col", "size_col", "color_col", "title", "xlabel", "ylabel", "zlabel"):
+            template.pop(key, None)
         path.write_text(json.dumps(template, ensure_ascii=False, indent=2), encoding="utf-8")
         self.template_combo.configure(values=self._template_names())
         self.template_var.set(safe_name)
@@ -1242,7 +1615,7 @@ class SciPlotApp(tk.Tk):
         if not path:
             return
         template = asdict(self.collect_settings())
-        for key in ("x_col", "y_cols", "error_col", "group_col", "title", "xlabel", "ylabel"):
+        for key in ("x_col", "y_cols", "z_col", "error_col", "group_col", "size_col", "color_col", "title", "xlabel", "ylabel", "zlabel"):
             template.pop(key, None)
         Path(path).write_text(json.dumps(template, ensure_ascii=False, indent=2), encoding="utf-8")
         self.set_status(f"已導出模板：{path}")
@@ -1407,11 +1780,15 @@ class SciPlotApp(tk.Tk):
     def restore_settings(self, settings: dict[str, Any]) -> None:
         self.chart_type_var.set(settings.get("chart_type", self.chart_type_var.get()))
         self.x_col_var.set(settings.get("x_col", self.x_col_var.get()))
+        self.z_col_var.set(settings.get("z_col", ""))
         self.error_col_var.set(settings.get("error_col", ""))
         self.group_col_var.set(settings.get("group_col", ""))
+        self.size_col_var.set(settings.get("size_col", ""))
+        self.color_col_var.set(settings.get("color_col", ""))
         self.title_var.set(settings.get("title", ""))
         self.xlabel_var.set(settings.get("xlabel", ""))
         self.ylabel_var.set(settings.get("ylabel", ""))
+        self.zlabel_var.set(settings.get("zlabel", ""))
         self.apply_template(settings, update_chart_type=False)
         y_cols = settings.get("y_cols") or []
         self._select_y_columns([col for col in y_cols if col in self.numeric_columns()])

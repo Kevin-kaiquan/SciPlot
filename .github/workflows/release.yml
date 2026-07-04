@@ -1,0 +1,109 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows portable app
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build SciPlot
+        shell: pwsh
+        run: .\build_exe.ps1
+
+      - name: Package Windows build
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist\SciPlot\* -DestinationPath SciPlot-Windows-x64.zip -Force
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SciPlot-Windows-x64
+          path: SciPlot-Windows-x64.zip
+
+      - name: Attach Windows build to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: SciPlot-Windows-x64.zip
+
+  build-macos:
+    name: Build macOS app (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-latest
+            archive: SciPlot-macOS-arm64.zip
+            artifact: SciPlot-macOS-arm64
+          - arch: intel
+            runner: macos-15-intel
+            archive: SciPlot-macOS-intel.zip
+            artifact: SciPlot-macOS-intel
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build SciPlot.app
+        run: |
+          pyinstaller \
+            --noconfirm \
+            --clean \
+            --windowed \
+            --name "SciPlot" \
+            --distpath dist \
+            --workpath build \
+            --specpath . \
+            --add-data "sample_data:sample_data" \
+            --add-data "templates:templates" \
+            src/sciplot_launcher.py
+          cp README.md dist/README.md
+          cp -R docs dist/docs
+          cp -R sample_data dist/sample_data
+          cp -R templates dist/templates
+
+      - name: Package macOS build
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent dist/SciPlot.app "${{ matrix.archive }}"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.archive }}
+
+      - name: Attach macOS build to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.archive }}
