@@ -7,9 +7,9 @@ $Staging = Join-Path $MsiRoot "staging\SciPlot"
 $WxsPath = Join-Path $MsiRoot "SciPlot.wxs"
 $LicensePath = Join-Path $MsiRoot "License.rtf"
 $OutputPath = Join-Path $Root "dist\SciPlot-Windows-x64.msi"
-$ProductVersion = "2.1.2"
+$ProductVersion = "2.1.3"
 $UpgradeCode = "AE751FD0-B9E6-410E-9F39-4A7BA2758F66"
-$WixVersion = "7.0.0"
+$WixVersion = "5.0.2"
 
 if (-not (Test-Path (Join-Path $DistApp "SciPlot.exe"))) {
     throw "Missing packaged app. Run build_exe.ps1 before scripts\build_msi.ps1."
@@ -54,6 +54,12 @@ function Get-RelativePathCompat([string]$basePath, [string]$targetPath) {
     $baseUri = New-Object System.Uri(($baseFull + [System.IO.Path]::DirectorySeparatorChar))
     $targetUri = New-Object System.Uri($targetFull)
     return [System.Uri]::UnescapeDataString($baseUri.MakeRelativeUri($targetUri).ToString()).Replace("/", [System.IO.Path]::DirectorySeparatorChar)
+}
+
+function Assert-NativeCommand([string]$description) {
+    if ($LASTEXITCODE -ne 0) {
+        throw "$description failed with exit code $LASTEXITCODE."
+    }
 }
 
 $componentIds = New-Object System.Collections.Generic.List[string]
@@ -135,23 +141,21 @@ $licenseText = "{\rtf1\ansi\deff0{\fonttbl{\f0 Segoe UI;}}\f0\fs20 SciPlot is pr
 $licenseText | Set-Content -Path $LicensePath -Encoding ASCII
 $wxs | Set-Content -Path $WxsPath -Encoding UTF8
 
-if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
-    $dotnetInfo = & dotnet --info 2>$null
-    if ($LASTEXITCODE -ne 0 -or ($dotnetInfo -notmatch " .NET SDKs installed:" -and $dotnetInfo -notmatch "SDKs installed:")) {
-        throw "WiX is not installed and no .NET SDK is available. Install the .NET SDK or build the MSI in GitHub Actions."
-    }
-    $ToolDir = Join-Path $MsiRoot "tools"
-    dotnet tool install wix --version $WixVersion --tool-path $ToolDir
-    $WixExe = Join-Path $ToolDir "wix.exe"
-} else {
-    $WixExe = (Get-Command wix).Source
+$dotnetSdks = & dotnet --list-sdks 2>$null
+if ($LASTEXITCODE -ne 0 -or -not $dotnetSdks) {
+    throw "No .NET SDK is available. Install the .NET SDK or build the MSI in GitHub Actions."
 }
 
-$env:WIX_EXTENSIONS = Join-Path $MsiRoot "wix-extensions"
-New-Item -ItemType Directory -Path $env:WIX_EXTENSIONS -Force | Out-Null
+$ToolDir = Join-Path $MsiRoot "tools"
+dotnet tool install wix --version $WixVersion --tool-path $ToolDir
+Assert-NativeCommand "Installing WiX $WixVersion"
+$WixExe = Join-Path $ToolDir "wix.exe"
 
-& $WixExe extension add --global "WixToolset.UI.wixext/$WixVersion"
-& $WixExe extension list
+& $WixExe extension add -g "WixToolset.UI.wixext/$WixVersion"
+Assert-NativeCommand "Installing WiX UI extension"
+& $WixExe extension list -g
+Assert-NativeCommand "Listing WiX extensions"
 & $WixExe build $WxsPath -arch x64 -ext WixToolset.UI.wixext -o $OutputPath
+Assert-NativeCommand "Building MSI"
 Write-Host "MSI build complete:" -ForegroundColor Green
 Write-Host $OutputPath
