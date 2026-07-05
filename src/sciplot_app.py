@@ -10,7 +10,7 @@ from typing import Any
 
 
 APP_NAME = "SciPlot"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 
 
 def get_app_home() -> Path:

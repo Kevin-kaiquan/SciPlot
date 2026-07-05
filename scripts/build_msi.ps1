@@ -6,7 +6,7 @@ $MsiRoot = Join-Path $Root "build\msi"
 $Staging = Join-Path $MsiRoot "staging\SciPlot"
 $WxsPath = Join-Path $MsiRoot "SciPlot.wxs"
 $OutputPath = Join-Path $Root "dist\SciPlot-Windows-x64.msi"
-$ProductVersion = "2.1.0"
+$ProductVersion = "2.1.1"
 $UpgradeCode = "AE751FD0-B9E6-410E-9F39-4A7BA2758F66"
 
 if (-not (Test-Path (Join-Path $DistApp "SciPlot.exe"))) {
@@ -37,6 +37,15 @@ function New-WixId([string]$prefix, [string]$value) {
     return "$prefix$($hash.Substring(0, 18))"
 }
 
+function New-StableGuid([string]$value) {
+    $sha1 = [System.Security.Cryptography.SHA1]::Create()
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes(("SciPlot|" + $value).ToLowerInvariant())
+    $hash = $sha1.ComputeHash($bytes)
+    $guidBytes = New-Object byte[] 16
+    [Array]::Copy($hash, $guidBytes, 16)
+    return (New-Object System.Guid -ArgumentList (, $guidBytes)).ToString().ToUpperInvariant()
+}
+
 function Get-RelativePathCompat([string]$basePath, [string]$targetPath) {
     $baseFull = [System.IO.Path]::GetFullPath($basePath).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
     $targetFull = [System.IO.Path]::GetFullPath($targetPath)
@@ -57,9 +66,10 @@ function Write-WixDirectory([System.IO.DirectoryInfo]$directory, [int]$indent) {
         $relative = Get-RelativePathCompat $Staging $file.FullName
         $componentId = New-WixId "Cmp" $relative
         $fileId = New-WixId "Fil" $relative
+        $componentGuid = New-StableGuid $relative
         $componentIds.Add($componentId)
         $source = ConvertTo-WixLiteral $file.FullName
-        $lines.Add("$pad  <Component Id=`"$componentId`" Guid=`"*`">")
+        $lines.Add("$pad  <Component Id=`"$componentId`" Guid=`"{$componentGuid}`">")
         $lines.Add("$pad    <File Id=`"$fileId`" Source=`"$source`" KeyPath=`"yes`" />")
         $lines.Add("$pad  </Component>")
     }
@@ -102,7 +112,8 @@ $wxs.Add("      </Directory>")
 $wxs.Add("    </StandardDirectory>")
 $wxs.Add("    <StandardDirectory Id=`"ProgramMenuFolder`">")
 $wxs.Add("      <Directory Id=`"ApplicationProgramsFolder`" Name=`"SciPlot`">")
-$wxs.Add("        <Component Id=`"StartMenuShortcut`" Guid=`"*`">")
+$shortcutGuid = New-StableGuid "StartMenuShortcut"
+$wxs.Add("        <Component Id=`"StartMenuShortcut`" Guid=`"{$shortcutGuid}`">")
 $wxs.Add("          <Shortcut Id=`"ApplicationStartMenuShortcut`" Name=`"SciPlot`" Description=`"Create scientific plots`" Target=`"[INSTALLFOLDER]SciPlot.exe`" WorkingDirectory=`"INSTALLFOLDER`" />")
 $wxs.Add("          <RemoveFolder Id=`"RemoveApplicationProgramsFolder`" On=`"uninstall`" />")
 $wxs.Add("          <RegistryValue Root=`"HKCU`" Key=`"Software\SciPlot`" Name=`"installed`" Type=`"integer`" Value=`"1`" KeyPath=`"yes`" />")
@@ -125,13 +136,13 @@ if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
     if ($LASTEXITCODE -ne 0 -or ($dotnetInfo -notmatch " .NET SDKs installed:" -and $dotnetInfo -notmatch "SDKs installed:")) {
         throw "WiX is not installed and no .NET SDK is available. Install the .NET SDK or build the MSI in GitHub Actions."
     }
-    dotnet tool install --global wix
-    $dotnetTools = Join-Path $env:USERPROFILE ".dotnet\tools"
-    if ($env:PATH -notlike "*$dotnetTools*") {
-        $env:PATH = "$dotnetTools;$env:PATH"
-    }
+    $ToolDir = Join-Path $MsiRoot "tools"
+    dotnet tool install wix --tool-path $ToolDir
+    $WixExe = Join-Path $ToolDir "wix.exe"
+} else {
+    $WixExe = (Get-Command wix).Source
 }
 
-wix build $WxsPath -o $OutputPath
+& $WixExe build $WxsPath -arch x64 -o $OutputPath
 Write-Host "MSI build complete:" -ForegroundColor Green
 Write-Host $OutputPath
