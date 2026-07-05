@@ -11,9 +11,35 @@ from tkinter import messagebox, ttk
 APP_TITLE = "SciPlot 正在啟動"
 
 
+def _app_dir() -> Path:
+    return Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]
+
+
+def _resource_path(*parts: str) -> Path:
+    resource_root = Path(getattr(sys, "_MEIPASS", _app_dir()))
+    candidate = resource_root.joinpath(*parts)
+    if candidate.exists():
+        return candidate
+    return _app_dir().joinpath(*parts)
+
+
+def _apply_splash_icon(window: tk.Tk) -> None:
+    try:
+        ico = _resource_path("logo", "SciPlot.ico")
+        png = _resource_path("logo", "SciPlot.png")
+        if ico.exists() and sys.platform.startswith("win"):
+            window.iconbitmap(str(ico))
+        if png.exists():
+            window._icon_image = tk.PhotoImage(file=str(png))
+            window.iconphoto(True, window._icon_image)
+    except tk.TclError:
+        pass
+
+
 def run_with_splash() -> None:
     splash = tk.Tk()
     splash.title(APP_TITLE)
+    _apply_splash_icon(splash)
     splash.geometry("420x180")
     splash.resizable(False, False)
     splash.configure(bg="#f8fafc")
@@ -65,7 +91,7 @@ def run_with_splash() -> None:
 
 
 def _write_startup_log(content: str) -> Path:
-    app_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]
+    app_dir = _app_dir()
     runtime = app_dir / "runtime"
     runtime.mkdir(parents=True, exist_ok=True)
     log_path = runtime / "startup_error.log"

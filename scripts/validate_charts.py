@@ -13,6 +13,7 @@ from sciplot_app import CHART_TYPES, EXPORT_DIR, SciPlotApp  # noqa: E402
 
 def render_all_chart_types() -> None:
     app = SciPlotApp(visible=False)
+    app.load_sample_data(silent=True)
     numeric = app.numeric_columns()
     failures: list[tuple[str, str, str]] = []
 

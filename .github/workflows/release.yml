@@ -27,22 +27,36 @@ jobs:
         shell: pwsh
         run: .\build_exe.ps1
 
+      - name: Validate packaged app
+        shell: pwsh
+        run: |
+          .\dist\SciPlot\SciPlot.exe --smoke-test
+          .\dist\SciPlot\SciPlot.exe --gui-smoke
+
       - name: Package Windows build
         shell: pwsh
         run: |
           Compress-Archive -Path dist\SciPlot\* -DestinationPath SciPlot-Windows-x64.zip -Force
 
+      - name: Build Windows MSI
+        shell: pwsh
+        run: .\scripts\build_msi.ps1
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: SciPlot-Windows-x64
-          path: SciPlot-Windows-x64.zip
+          path: |
+            SciPlot-Windows-x64.zip
+            dist/SciPlot-Windows-x64.msi
 
       - name: Attach Windows build to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: SciPlot-Windows-x64.zip
+          files: |
+            SciPlot-Windows-x64.zip
+            dist/SciPlot-Windows-x64.msi
 
   build-macos:
     name: Build macOS app (${{ matrix.arch }})
@@ -74,6 +88,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Prepare app icons
+        run: python scripts/prepare_icons.py
+
       - name: Build SciPlot.app
         run: |
           pyinstaller \
@@ -81,16 +98,23 @@ jobs:
             --clean \
             --windowed \
             --name "SciPlot" \
+            --icon "logo/SciPlot.icns" \
+            --hidden-import "matplotlib.backends.backend_agg" \
+            --hidden-import "matplotlib.backends.backend_pdf" \
+            --hidden-import "matplotlib.backends.backend_ps" \
+            --hidden-import "matplotlib.backends.backend_svg" \
             --distpath dist \
             --workpath build \
             --specpath . \
             --add-data "sample_data:sample_data" \
             --add-data "templates:templates" \
+            --add-data "logo:logo" \
             src/sciplot_launcher.py
           cp README.md dist/README.md
           cp -R docs dist/docs
           cp -R sample_data dist/sample_data
           cp -R templates dist/templates
+          cp -R logo dist/logo
 
       - name: Package macOS build
         run: |

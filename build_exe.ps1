@@ -16,17 +16,24 @@ if (-not (Test-Path $Python)) {
 
 & $Python -m pip install --upgrade pip
 & $Pip install -r (Join-Path $Root "requirements.txt")
+& $Python (Join-Path $Root "scripts\prepare_icons.py")
 
 & $PyInstaller `
     --noconfirm `
     --clean `
     --windowed `
     --name "SciPlot" `
+    --icon (Join-Path $Root "logo\SciPlot.ico") `
+    --hidden-import "matplotlib.backends.backend_agg" `
+    --hidden-import "matplotlib.backends.backend_pdf" `
+    --hidden-import "matplotlib.backends.backend_ps" `
+    --hidden-import "matplotlib.backends.backend_svg" `
     --distpath (Join-Path $Root "dist") `
     --workpath (Join-Path $Root "build") `
     --specpath $Root `
     --add-data "$Root\sample_data;sample_data" `
     --add-data "$Root\templates;templates" `
+    --add-data "$Root\logo;logo" `
     (Join-Path $Root "src\sciplot_launcher.py")
 
 $DistApp = Join-Path $Root "dist\SciPlot"
@@ -35,6 +42,7 @@ Copy-Item -LiteralPath (Join-Path $Root "Sci_plot.txt") -Destination (Join-Path 
 Copy-Item -LiteralPath (Join-Path $Root "docs") -Destination (Join-Path $DistApp "docs") -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $Root "sample_data") -Destination (Join-Path $DistApp "sample_data") -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $Root "templates") -Destination (Join-Path $DistApp "templates") -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $Root "logo") -Destination (Join-Path $DistApp "logo") -Recurse -Force
 
 Write-Host ""
 Write-Host "Build complete:" -ForegroundColor Green

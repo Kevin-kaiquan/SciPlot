@@ -1,6 +1,6 @@
 # SciPlot
 
-SciPlot is a local Windows desktop application for creating publication-ready scientific plots from tabular data. It is designed for students, coursework, lab reports, and lightweight research workflows.
+SciPlot is a local desktop application for creating publication-ready scientific plots from tabular data. It is designed for students, coursework, lab reports, and lightweight research workflows.
 
 SciPlot does not include a template marketplace, paid templates, accounts, payment features, advertising, or user tracking.
 
@@ -8,110 +8,67 @@ SciPlot does not include a template marketplace, paid templates, accounts, payme
 
 - Import CSV, TSV, TXT, XLSX, and XLS data files.
 - Preview imported data in a table.
-- Create line charts, scatter plots, bar charts, error-bar plots, histograms, box plots, and correlation heatmaps.
-- Create advanced scientific figures including density curves, ECDF plots, violin plots, lollipop plots, 2D density plots, hexbin plots, contour plots, radar charts, polar plots, pie/donut charts, and 3D scatter/line/surface/wireframe/bar/contour plots.
-- Apply built-in scientific plot templates, including SciPlot Classic.
-- Export figures as PNG, SVG, or PDF.
+- Create common plots such as line, scatter, bar, error-bar, histogram, box, violin, and heatmap figures.
+- Create advanced scientific figures including density curves, ECDF plots, lollipop plots, 2D density plots, hexbin plots, contour plots, radar charts, polar plots, pie/donut charts, and 3D scatter/line/surface/wireframe/bar/contour plots.
+- Export figures as PNG, SVG, or PDF with predictable canvas size.
 - Save and load SciPlot project files as JSON.
 - Import, export, and share local template JSON files.
-- Run fully locally on Windows.
+- Restore the last generated chart on the next launch.
+- Run fully locally without online services.
 
-## Project Structure
+## Downloads
 
-```text
-src/                         Application source code
-docs/                        User documentation
-scripts/                     Validation and maintenance scripts
-sample_data/                 Example input data
-templates/                   Built-in plot templates
-requirements.txt             Python dependencies
-build_exe.ps1                Windows exe build script
-run_dev.ps1                  Development launcher
-.github/workflows/           CI and release packaging workflows
-```
+Tagged releases are built by GitHub Actions and published on the GitHub Releases page.
 
-Generated folders such as `.venv/`, `build/`, `dist/`, `runtime/`, `exports/`, and `output/` are intentionally ignored by Git.
+- `SciPlot-Windows-x64.msi` is the recommended Windows installer.
+- `SciPlot-Windows-x64.zip` is a portable Windows build.
+- `SciPlot-macOS-arm64.zip` contains the macOS app bundle for Apple Silicon.
+- `SciPlot-macOS-intel.zip` contains the macOS app bundle for Intel Macs.
 
-## Run From Source
+The Windows installer and portable build include the Python runtime and required scientific libraries.
 
-First build the local virtual environment and install dependencies:
+## Usage
+
+1. Install SciPlot or extract the portable Windows archive.
+2. Launch SciPlot.
+3. Import a data file or load the included sample dataset.
+4. Select the chart type, data columns, and style options.
+5. Click **Generate Chart**.
+6. Export the figure as PNG, SVG, or PDF.
+
+SciPlot starts with an empty workspace on first launch. After a chart is generated, the next launch restores the last generated chart.
+
+## Development
+
+Install dependencies and build the local desktop package:
 
 ```powershell
 .\build_exe.ps1
 ```
 
-Then run the development version:
+Run the development version:
 
 ```powershell
 .\run_dev.ps1
 ```
 
-## Build The Windows App
-
-Run:
+Build the Windows MSI after the portable app has been built:
 
 ```powershell
-.\build_exe.ps1
+.\scripts\build_msi.ps1
 ```
 
-The script creates a local virtual environment under:
-
-```text
-E:\Sci_Plot\.venv
-```
-
-It also keeps pip, Matplotlib, Python bytecode, and PyInstaller cache files inside the project folder as much as possible.
-
-The packaged application is generated at:
-
-```text
-E:\Sci_Plot\dist\SciPlot\SciPlot.exe
-```
-
-## Portable Distribution
-
-SciPlot is packaged as a portable folder application. To share it with another Windows user, copy the entire folder:
-
-```text
-E:\Sci_Plot\dist\SciPlot
-```
-
-Do not copy only `SciPlot.exe`; the executable needs the `_internal` folder and bundled resources next to it.
-
-On first launch, SciPlot shows a startup window while it loads Pandas, Matplotlib, and other scientific plotting dependencies. The first startup can take around 20 to 40 seconds on some machines.
-
-## GitHub Releases
-
-Tagged releases are built by GitHub Actions:
-
-- `SciPlot-Windows-x64.zip` contains the Windows portable app with `SciPlot.exe`.
-- `SciPlot-macOS-arm64.zip` contains the macOS `.app` bundle for Apple Silicon.
-- `SciPlot-macOS-intel.zip` contains the macOS `.app` bundle for Intel Macs.
-
-To publish a release, push a version tag such as:
-
-```powershell
-git tag v2.0.0
-git push origin v2.0.0
-```
-
-The release workflow builds both platforms and attaches the downloadable archives to the GitHub release.
-
-## Validation
-
-After building the app, run:
-
-```powershell
-E:\Sci_Plot\dist\SciPlot\SciPlot.exe --smoke-test
-E:\Sci_Plot\dist\SciPlot\SciPlot.exe --gui-smoke
-```
-
-Both commands should exit with code `0`.
-
-To validate every supported chart type from source, run:
+Validate all supported chart types:
 
 ```powershell
 .\.venv\Scripts\python.exe .\scripts\validate_charts.py
+```
+
+Validate a packaged Windows build:
+
+```powershell
+.\dist\SciPlot\SciPlot.exe --smoke-test
+.\dist\SciPlot\SciPlot.exe --gui-smoke
 ```
 
 ## Data Format
@@ -126,22 +83,11 @@ time_s,signal_a,signal_b,error_a,group
 1,0.18,0.21,0.03,control
 ```
 
-An example dataset is available at:
-
-```text
-sample_data/example_measurements.csv
-sample_data/example_surface_grid.csv
-```
+Sample datasets are included in the repository for basic line charts and 3D/contour examples.
 
 ## Templates
 
-Templates are plain JSON files stored in:
-
-```text
-templates/
-```
-
-They can be edited, imported, exported, and shared without any online account or marketplace.
+Templates are plain JSON files. They can be edited, imported, exported, and shared without any online account or marketplace.
 
 ## License
 

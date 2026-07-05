@@ -3,9 +3,14 @@ from __future__ import annotations
 import json
 import os
 import sys
+import warnings
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any
+
+
+APP_NAME = "SciPlot"
+APP_VERSION = "2.1.0"
 
 
 def get_app_home() -> Path:
@@ -15,7 +20,32 @@ def get_app_home() -> Path:
 
 
 APP_HOME = get_app_home()
-RUNTIME_DIR = APP_HOME / "runtime"
+
+
+def can_write_to(directory: Path) -> bool:
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        probe = directory / ".sciplot_write_test"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
+
+
+def get_user_data_home() -> Path:
+    if not getattr(sys, "frozen", False):
+        return APP_HOME
+    if not (APP_HOME / "sciplot_installed.flag").exists() and can_write_to(APP_HOME):
+        return APP_HOME
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+    if base:
+        return Path(base) / APP_NAME
+    return Path.home() / f".{APP_NAME.lower()}"
+
+
+APP_DATA_HOME = get_user_data_home()
+RUNTIME_DIR = APP_DATA_HOME / "runtime"
 RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("MPLCONFIGDIR", str(RUNTIME_DIR / "matplotlib"))
 
@@ -32,23 +62,24 @@ from matplotlib.patches import Circle
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - required for PyInstaller 3D projection collection
 
 
-APP_NAME = "SciPlot"
-APP_VERSION = "2.0.0"
-
 RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", APP_HOME))
-TEMPLATE_DIR = APP_HOME / "templates"
+PACKAGE_TEMPLATE_DIR = RESOURCE_ROOT / "templates"
+TEMPLATE_DIR = APP_DATA_HOME / "templates"
 SAMPLE_DIR = RESOURCE_ROOT / "sample_data"
-USER_DATA_DIR = APP_HOME / "user_data"
-EXPORT_DIR = APP_HOME / "exports"
+USER_DATA_DIR = APP_DATA_HOME / "user_data"
+EXPORT_DIR = APP_DATA_HOME / "exports"
+STATE_PATH = APP_DATA_HOME / "last_session.json"
+LOGO_DIR = RESOURCE_ROOT / "logo"
+APP_ICON_PNG = LOGO_DIR / "SciPlot.png"
+APP_ICON_ICO = LOGO_DIR / "SciPlot.ico"
 
 for directory in (TEMPLATE_DIR, USER_DATA_DIR, EXPORT_DIR, RUNTIME_DIR / "matplotlib"):
     directory.mkdir(parents=True, exist_ok=True)
 
 
 def seed_packaged_files() -> None:
-    resource_templates = RESOURCE_ROOT / "templates"
-    if resource_templates.exists():
-        for source in resource_templates.glob("*.json"):
+    if PACKAGE_TEMPLATE_DIR.exists():
+        for source in PACKAGE_TEMPLATE_DIR.glob("*.json"):
             destination = TEMPLATE_DIR / source.name
             if not destination.exists():
                 destination.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
@@ -264,7 +295,8 @@ class SciPlotApp(tk.Tk):
         self._vars: dict[str, tk.Variable] = {}
         self._build_style()
         self._build_ui()
-        self._load_initial_sample()
+        self._load_last_session()
+        self._apply_window_icon()
 
     def _set_initial_geometry(self) -> None:
         screen_w = self.winfo_screenwidth()
@@ -275,6 +307,16 @@ class SciPlotApp(tk.Tk):
         x = 40 if screen_w > width + 80 else max(0, (screen_w - width) // 2)
         y = 40 if screen_h > height + 80 else max(0, (screen_h - height) // 2)
         self.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _apply_window_icon(self) -> None:
+        try:
+            if APP_ICON_ICO.exists() and sys.platform.startswith("win"):
+                self.iconbitmap(str(APP_ICON_ICO))
+            if APP_ICON_PNG.exists():
+                self._icon_image = tk.PhotoImage(file=str(APP_ICON_PNG))
+                self.iconphoto(True, self._icon_image)
+        except tk.TclError:
+            pass
 
     def _build_style(self) -> None:
         self.colors = {
@@ -861,23 +903,28 @@ class SciPlotApp(tk.Tk):
                 names.append(path.stem)
         return names
 
-    def _load_initial_sample(self) -> None:
-        self.load_sample_data(silent=True)
-        if not self.df.empty:
-            self.apply_template(BUILTIN_TEMPLATES["SciPlot Classic"], update_chart_type=True)
-            numeric_cols = self.numeric_columns()
-            if "time_s" in self.df.columns:
-                self.x_col_var.set("time_s")
-            if "temperature_c" in self.df.columns:
-                self.z_col_var.set("temperature_c")
-            if "group" in self.df.columns:
-                self.group_col_var.set("group")
-            if numeric_cols:
-                self._select_y_columns([col for col in ["signal_a", "signal_b"] if col in numeric_cols] or numeric_cols[:1])
-            self.title_var.set("示例實驗信號")
-            self.xlabel_var.set("Time (s)")
-            self.ylabel_var.set("Signal intensity")
-            self.render_plot(silent=True)
+    def _load_last_session(self) -> None:
+        if not STATE_PATH.exists():
+            self.set_status("就緒。載入數據後可生成圖表。")
+            return
+        try:
+            payload = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+            records = payload.get("records") or []
+            columns = payload.get("columns") or None
+            if not records:
+                self.set_status("就緒。載入數據後可生成圖表。")
+                return
+            self.df = pd.DataFrame(records, columns=columns)
+            self.data_source = payload.get("data_source", "")
+            self.source_var.set(self.data_source or "上次會話")
+            self.refresh_after_data_load()
+            self.restore_settings(payload.get("settings", {}))
+            self.render_plot(silent=True, persist=False)
+            if self.figure is not None:
+                self.navigate("plot")
+                self.set_status("已恢復上次生成的圖表。")
+        except Exception:
+            self.set_status("未能恢復上次圖表，請重新載入數據。")
 
     def load_sample_data(self, silent: bool = False) -> None:
         sample_path = APP_HOME / "sample_data" / "example_measurements.csv"
@@ -895,7 +942,6 @@ class SciPlotApp(tk.Tk):
             self.set_status(f"已載入示例數據：{sample_path.name}")
             if not silent:
                 self.navigate("plot")
-                self.render_plot(silent=True)
         except Exception as exc:
             if not silent:
                 messagebox.showerror("載入失敗", f"無法載入示例數據：\n{exc}")
@@ -919,8 +965,7 @@ class SciPlotApp(tk.Tk):
             self.source_var.set(path)
             self.refresh_after_data_load()
             self.navigate("plot")
-            self.render_plot(silent=True)
-            self.set_status(f"已載入數據：{Path(path).name}")
+            self.set_status(f"已載入數據：{Path(path).name}。請點擊「生成圖表」。")
         except Exception as exc:
             messagebox.showerror("載入失敗", f"無法讀取數據文件：\n{exc}")
 
@@ -1060,11 +1105,13 @@ class SciPlotApp(tk.Tk):
         variable.set(value)
         return value
 
-    def render_plot(self, silent: bool = False) -> None:
+    def render_plot(self, silent: bool = False, persist: bool | None = None) -> None:
         if self.df.empty:
             if not silent:
                 messagebox.showwarning("沒有數據", "請先載入 CSV 或 Excel 數據。")
             return
+        if persist is None:
+            persist = not silent
         settings = self.collect_settings()
         chart_key = CHART_TYPES.get(settings.chart_type, "line")
         no_x_required = {"histogram", "density", "ecdf", "boxplot", "violin", "heatmap", "radar", "pie", "donut"}
@@ -1083,24 +1130,53 @@ class SciPlotApp(tk.Tk):
         try:
             self.current_settings = settings
             preview_dpi = min(settings.dpi, 150)
-            fig = Figure(figsize=(settings.width, settings.height), dpi=preview_dpi)
-            if chart_key in {"scatter3d", "line3d", "surface3d", "wireframe3d", "bar3d", "contour3d"}:
-                ax = fig.add_subplot(111, projection="3d")
-            elif chart_key in {"radar", "polar_line", "polar_scatter"}:
-                ax = fig.add_subplot(111, projection="polar")
-            else:
-                ax = fig.add_subplot(111)
-            fig.patch.set_facecolor("#ffffff")
-            ax.set_facecolor("#ffffff")
-
-            colors = PALETTES.get(settings.palette, PALETTES["期刊藍灰"])
-            rcParams["font.size"] = settings.font_size
-            self._plot_by_type(ax, chart_key, settings, colors)
-            self._decorate_axes(ax, fig, settings, chart_key)
+            fig = self._create_plot_figure(settings, chart_key, preview_dpi)
             self._show_figure(fig)
             self.set_status(f"圖表已更新：{settings.chart_type}")
+            if persist:
+                self._save_last_session(settings)
         except Exception as exc:
-            messagebox.showerror("繪圖失敗", f"生成圖表時出錯：\n{exc}")
+            if not silent:
+                messagebox.showerror("繪圖失敗", f"生成圖表時出錯：\n{exc}")
+
+    def _create_plot_figure(self, settings: PlotSettings, chart_key: str, dpi: int) -> Figure:
+        fig = Figure(figsize=(settings.width, settings.height), dpi=dpi)
+        if chart_key in {"scatter3d", "line3d", "surface3d", "wireframe3d", "bar3d", "contour3d"}:
+            ax = fig.add_subplot(111, projection="3d")
+        elif chart_key in {"radar", "polar_line", "polar_scatter"}:
+            ax = fig.add_subplot(111, projection="polar")
+        else:
+            ax = fig.add_subplot(111)
+        fig.patch.set_facecolor("#ffffff")
+        ax.set_facecolor("#ffffff")
+
+        if hasattr(self, "figure_colorbar"):
+            self.figure_colorbar = None
+        colors = PALETTES.get(settings.palette, PALETTES["期刊藍灰"])
+        rcParams["font.size"] = settings.font_size
+        rcParams["pdf.fonttype"] = 42
+        rcParams["ps.fonttype"] = 42
+        self._plot_by_type(ax, chart_key, settings, colors)
+        self._decorate_axes(ax, fig, settings, chart_key)
+        return fig
+
+    def _save_last_session(self, settings: PlotSettings) -> None:
+        if self.df.empty:
+            return
+        payload = {
+            "app": APP_NAME,
+            "version": APP_VERSION,
+            "data_source": self.data_source,
+            "columns": list(self.df.columns),
+            "records": self.df.replace({np.nan: None}).to_dict(orient="records"),
+            "settings": asdict(settings),
+        }
+        try:
+            temp_path = STATE_PATH.with_suffix(".tmp")
+            temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            temp_path.replace(STATE_PATH)
+        except OSError:
+            self.set_status("圖表已生成，但未能保存上次會話。")
 
     def _plot_by_type(self, ax: Any, chart_key: str, settings: PlotSettings, colors: list[str]) -> None:
         if chart_key == "line":
@@ -1485,7 +1561,7 @@ class SciPlotApp(tk.Tk):
             ax.bar3d(x, y, z_base, dx, dy, z, color=colors[0], alpha=0.72, shade=True)
 
     def _decorate_axes(self, ax: Any, fig: Figure, settings: PlotSettings, chart_key: str) -> None:
-        ax.set_title(settings.title, fontsize=settings.font_size + 2, pad=12)
+        ax.set_title(settings.title, fontsize=settings.font_size + 2, pad=14, wrap=True)
         if chart_key in {"scatter3d", "line3d", "surface3d", "wireframe3d", "bar3d", "contour3d"}:
             ax.set_xlabel(settings.xlabel or settings.x_col)
             ax.set_ylabel(settings.ylabel or ", ".join(settings.y_cols or []))
@@ -1511,16 +1587,32 @@ class SciPlotApp(tk.Tk):
                     )
                 else:
                     ax.legend(frameon=False)
-        if chart_key == "heatmap" and hasattr(self, "figure_colorbar"):
+        if chart_key == "heatmap" and getattr(self, "figure_colorbar", None) is not None:
             fig.colorbar(self.figure_colorbar, ax=ax, fraction=0.046, pad=0.04, label="Pearson r")
         if hasattr(ax, "spines"):
             for spine in ax.spines.values():
                 spine.set_color("#374151")
                 spine.set_linewidth(0.8)
+        if chart_key not in {"heatmap", "radar", "polar_line", "polar_scatter", "pie", "donut"}:
+            visible_xticks = [tick for tick in ax.get_xticklabels() if tick.get_text()]
+            if len(visible_xticks) > 8:
+                for tick in visible_xticks:
+                    tick.set_rotation(30)
+                    tick.set_ha("right")
         if settings.tight_layout:
-            fig.tight_layout()
+            try:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("error", message="Tight layout not applied.*")
+                    fig.tight_layout(pad=1.6)
+            except Warning:
+                if chart_key in {"scatter3d", "line3d", "surface3d", "wireframe3d", "bar3d", "contour3d"}:
+                    fig.subplots_adjust(left=0.04, right=0.92, top=0.86, bottom=0.08)
+                elif chart_key in {"radar", "polar_line", "polar_scatter"}:
+                    fig.subplots_adjust(left=0.12, right=0.88, top=0.86, bottom=0.12)
+                else:
+                    fig.subplots_adjust(left=0.14, right=0.94, top=0.86, bottom=0.16)
         if bottom_legend:
-            fig.subplots_adjust(bottom=0.24)
+            fig.subplots_adjust(bottom=0.28)
 
     def _show_figure(self, fig: Figure) -> None:
         for child in self.plot_container.winfo_children():
@@ -1700,7 +1792,7 @@ class SciPlotApp(tk.Tk):
         try:
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / name
-            self.figure.savefig(path, dpi=max(72, int(dpi_var.get())), bbox_inches="tight", transparent=bool(transparent_var.get()))
+            self._save_current_figure(path, max(72, int(dpi_var.get())), bool(transparent_var.get()))
             self.set_status(f"已導出圖表：{path}")
             self.refresh_home_lists()
             dialog.destroy()
@@ -1721,11 +1813,23 @@ class SciPlotApp(tk.Tk):
         if not path:
             return
         try:
-            self.figure.savefig(path, dpi=self._int_var(self.dpi_var, 300, 72, 1200), bbox_inches="tight")
+            self._save_current_figure(Path(path), self._int_var(self.dpi_var, 300, 72, 1200), False)
             self.set_status(f"已導出圖表：{path}")
             self.refresh_home_lists()
         except Exception as exc:
             messagebox.showerror("導出失敗", f"保存圖表時出錯：\n{exc}")
+
+    def _save_current_figure(self, path: Path, dpi: int, transparent: bool) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        settings = self.current_settings
+        chart_key = CHART_TYPES.get(settings.chart_type, "line")
+        export_figure = self._create_plot_figure(settings, chart_key, dpi)
+        save_kwargs: dict[str, Any] = {"dpi": dpi, "transparent": transparent}
+        if transparent:
+            save_kwargs["facecolor"] = "none"
+        else:
+            save_kwargs["facecolor"] = export_figure.get_facecolor()
+        export_figure.savefig(path, **save_kwargs)
 
     def save_project(self) -> None:
         if self.df.empty:
@@ -1826,7 +1930,6 @@ def run_smoke_test() -> None:
         raise FileNotFoundError("sample_data/example_measurements.csv not found")
 
     df = pd.read_csv(sample_path)
-    output_path = EXPORT_DIR / "smoke_test.png"
     fig = Figure(figsize=(6.4, 3.8), dpi=150)
     ax = fig.add_subplot(111)
     for group_name, group_df in df.groupby("group"):
@@ -1838,20 +1941,23 @@ def run_smoke_test() -> None:
     ax.grid(True, color="#d1d5db", linewidth=0.7)
     ax.legend(frameon=False)
     fig.tight_layout()
-    fig.savefig(output_path, dpi=150)
-    print(output_path)
+    for suffix in ("png", "svg", "pdf"):
+        output_path = EXPORT_DIR / f"smoke_test.{suffix}"
+        fig.savefig(output_path, dpi=150)
+        if not output_path.exists() or output_path.stat().st_size < 1000:
+            raise RuntimeError(f"{suffix.upper()} smoke export failed")
+        print(output_path)
 
 
 def run_gui_smoke_test() -> None:
     app = SciPlotApp(visible=False)
     app.update_idletasks()
     app.update()
-    if app.df.empty:
+    app.load_sample_data(silent=True)
+    app.render_plot(silent=True, persist=False)
+    if app.df.empty or app.figure is None:
         app.destroy()
-        raise RuntimeError("GUI smoke test failed: sample data was not loaded")
-    if app.figure is None:
-        app.destroy()
-        raise RuntimeError("GUI smoke test failed: initial figure was not rendered")
+        raise RuntimeError("GUI smoke test failed: sample figure was not rendered")
     app.destroy()
     print("gui-ok")
 
