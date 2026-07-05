@@ -22,8 +22,8 @@ Tagged releases are built by GitHub Actions and published on the GitHub Releases
 
 - `SciPlot-Windows-x64.msi` is the recommended Windows installer.
 - `SciPlot-Windows-x64.zip` is a portable Windows build.
-- `SciPlot-macOS-arm64.zip` contains the macOS app bundle for Apple Silicon.
-- `SciPlot-macOS-intel.zip` contains the macOS app bundle for Intel Macs.
+- `SciPlot-macOS-arm64.dmg` is the macOS installer image for Apple Silicon.
+- `SciPlot-macOS-intel.dmg` is the macOS installer image for Intel Macs.
 
 The Windows installer and portable build include the Python runtime and required scientific libraries.
 
@@ -37,6 +37,8 @@ The Windows installer and portable build include the Python runtime and required
 6. Export the figure as PNG, SVG, or PDF.
 
 SciPlot starts with an empty workspace on first launch. After a chart is generated, the next launch restores the last generated chart.
+
+The Windows MSI installer shows a destination folder step, so users can choose where SciPlot is installed.
 
 ## Development
 

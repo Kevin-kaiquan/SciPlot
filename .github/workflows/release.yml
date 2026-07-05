@@ -23,6 +23,11 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
       - name: Build SciPlot
         shell: pwsh
         run: .\build_exe.ps1
@@ -67,11 +72,11 @@ jobs:
         include:
           - arch: arm64
             runner: macos-latest
-            archive: SciPlot-macOS-arm64.zip
+            dmg: SciPlot-macOS-arm64.dmg
             artifact: SciPlot-macOS-arm64
           - arch: intel
             runner: macos-15-intel
-            archive: SciPlot-macOS-intel.zip
+            dmg: SciPlot-macOS-intel.dmg
             artifact: SciPlot-macOS-intel
 
     steps:
@@ -116,18 +121,26 @@ jobs:
           cp -R templates dist/templates
           cp -R logo dist/logo
 
-      - name: Package macOS build
+      - name: Package macOS DMG
         run: |
-          ditto -c -k --sequesterRsrc --keepParent dist/SciPlot.app "${{ matrix.archive }}"
+          mkdir -p dmg-root
+          cp -R dist/SciPlot.app dmg-root/
+          ln -s /Applications dmg-root/Applications
+          hdiutil create \
+            -volname "SciPlot" \
+            -srcfolder dmg-root \
+            -ov \
+            -format UDZO \
+            "${{ matrix.dmg }}"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.archive }}
+          path: ${{ matrix.dmg }}
 
       - name: Attach macOS build to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.archive }}
+          files: ${{ matrix.dmg }}

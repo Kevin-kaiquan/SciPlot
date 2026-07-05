@@ -5,9 +5,11 @@ $DistApp = Join-Path $Root "dist\SciPlot"
 $MsiRoot = Join-Path $Root "build\msi"
 $Staging = Join-Path $MsiRoot "staging\SciPlot"
 $WxsPath = Join-Path $MsiRoot "SciPlot.wxs"
+$LicensePath = Join-Path $MsiRoot "License.rtf"
 $OutputPath = Join-Path $Root "dist\SciPlot-Windows-x64.msi"
-$ProductVersion = "2.1.1"
+$ProductVersion = "2.1.2"
 $UpgradeCode = "AE751FD0-B9E6-410E-9F39-4A7BA2758F66"
+$WixVersion = "7.0.0"
 
 if (-not (Test-Path (Join-Path $DistApp "SciPlot.exe"))) {
     throw "Missing packaged app. Run build_exe.ps1 before scripts\build_msi.ps1."
@@ -97,17 +99,17 @@ $componentRefs.Add("      <ComponentRef Id=`"StartMenuShortcut`" />")
 
 $wxs = New-Object System.Collections.Generic.List[string]
 $wxs.Add("<?xml version=`"1.0`" encoding=`"UTF-8`"?>")
-$wxs.Add("<Wix xmlns=`"http://wixtoolset.org/schemas/v4/wxs`">")
-$wxs.Add("  <Package Name=`"SciPlot`" Manufacturer=`"SciPlot`" Version=`"$ProductVersion`" UpgradeCode=`"{$UpgradeCode}`" Scope=`"perUser`">")
+$wxs.Add("<Wix xmlns=`"http://wixtoolset.org/schemas/v4/wxs`" xmlns:ui=`"http://wixtoolset.org/schemas/v4/wxs/ui`">")
+$wxs.Add("  <Package Name=`"SciPlot`" Manufacturer=`"SciPlot`" Version=`"$ProductVersion`" UpgradeCode=`"{$UpgradeCode}`" Scope=`"perMachine`">")
 $wxs.Add("    <MajorUpgrade DowngradeErrorMessage=`"A newer version of SciPlot is already installed.`" />")
 $wxs.Add("    <MediaTemplate EmbedCab=`"yes`" />")
-$wxs.Add("    <StandardDirectory Id=`"LocalAppDataFolder`">")
-$wxs.Add("      <Directory Id=`"ProgramsFolder`" Name=`"Programs`">")
-$wxs.Add("        <Directory Id=`"INSTALLFOLDER`" Name=`"SciPlot`">")
+$wxs.Add("    <ui:WixUI Id=`"WixUI_InstallDir`" InstallDirectory=`"INSTALLFOLDER`" />")
+$wxs.Add("    <WixVariable Id=`"WixUILicenseRtf`" Value=`"$([System.Security.SecurityElement]::Escape($LicensePath))`" />")
+$wxs.Add("    <StandardDirectory Id=`"ProgramFiles64Folder`">")
+$wxs.Add("      <Directory Id=`"INSTALLFOLDER`" Name=`"SciPlot`">")
 foreach ($line in $installFolderContent) {
     $wxs.Add($line)
 }
-$wxs.Add("        </Directory>")
 $wxs.Add("      </Directory>")
 $wxs.Add("    </StandardDirectory>")
 $wxs.Add("    <StandardDirectory Id=`"ProgramMenuFolder`">")
@@ -116,7 +118,7 @@ $shortcutGuid = New-StableGuid "StartMenuShortcut"
 $wxs.Add("        <Component Id=`"StartMenuShortcut`" Guid=`"{$shortcutGuid}`">")
 $wxs.Add("          <Shortcut Id=`"ApplicationStartMenuShortcut`" Name=`"SciPlot`" Description=`"Create scientific plots`" Target=`"[INSTALLFOLDER]SciPlot.exe`" WorkingDirectory=`"INSTALLFOLDER`" />")
 $wxs.Add("          <RemoveFolder Id=`"RemoveApplicationProgramsFolder`" On=`"uninstall`" />")
-$wxs.Add("          <RegistryValue Root=`"HKCU`" Key=`"Software\SciPlot`" Name=`"installed`" Type=`"integer`" Value=`"1`" KeyPath=`"yes`" />")
+$wxs.Add("          <RegistryValue Root=`"HKLM`" Key=`"Software\SciPlot`" Name=`"installed`" Type=`"integer`" Value=`"1`" KeyPath=`"yes`" />")
 $wxs.Add("        </Component>")
 $wxs.Add("      </Directory>")
 $wxs.Add("    </StandardDirectory>")
@@ -129,6 +131,8 @@ $wxs.Add("  </Package>")
 $wxs.Add("</Wix>")
 
 New-Item -ItemType Directory -Path $MsiRoot -Force | Out-Null
+$licenseText = "{\rtf1\ansi\deff0{\fonttbl{\f0 Segoe UI;}}\f0\fs20 SciPlot is provided as a local scientific plotting application.\par\par No license has been added to this repository yet. Add a license before broad public distribution.\par}"
+$licenseText | Set-Content -Path $LicensePath -Encoding ASCII
 $wxs | Set-Content -Path $WxsPath -Encoding UTF8
 
 if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
@@ -137,12 +141,17 @@ if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
         throw "WiX is not installed and no .NET SDK is available. Install the .NET SDK or build the MSI in GitHub Actions."
     }
     $ToolDir = Join-Path $MsiRoot "tools"
-    dotnet tool install wix --tool-path $ToolDir
+    dotnet tool install wix --version $WixVersion --tool-path $ToolDir
     $WixExe = Join-Path $ToolDir "wix.exe"
 } else {
     $WixExe = (Get-Command wix).Source
 }
 
-& $WixExe build $WxsPath -arch x64 -o $OutputPath
+$env:WIX_EXTENSIONS = Join-Path $MsiRoot "wix-extensions"
+New-Item -ItemType Directory -Path $env:WIX_EXTENSIONS -Force | Out-Null
+
+& $WixExe extension add --global "WixToolset.UI.wixext/$WixVersion"
+& $WixExe extension list
+& $WixExe build $WxsPath -arch x64 -ext WixToolset.UI.wixext -o $OutputPath
 Write-Host "MSI build complete:" -ForegroundColor Green
 Write-Host $OutputPath
