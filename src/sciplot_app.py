@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 import warnings
@@ -17,8 +18,10 @@ from typing import Any
 
 
 APP_NAME = "SciPlot"
-APP_VERSION = "2.1.7"
+APP_VERSION = "2.1.8"
 MAX_SESSION_RECORDS = 5000
+AUTO_UPDATE_CHECK_DELAY_MS = 3500
+AUTO_UPDATE_CHECK_INTERVAL_SECONDS = 24 * 60 * 60
 GITHUB_RELEASES_URL = "https://github.com/Kevin-kaiquan/SciPlot/releases"
 GITHUB_LATEST_RELEASE_API = "https://api.github.com/repos/Kevin-kaiquan/SciPlot/releases/latest"
 
@@ -83,6 +86,7 @@ SAMPLE_DIR = RESOURCE_ROOT / "sample_data"
 USER_DATA_DIR = APP_DATA_HOME / "user_data"
 EXPORT_DIR = APP_DATA_HOME / "exports"
 STATE_PATH = APP_DATA_HOME / "last_session.json"
+UPDATE_STATE_PATH = APP_DATA_HOME / "update_state.json"
 LOGO_DIR = RESOURCE_ROOT / "logo"
 APP_ICON_PNG = LOGO_DIR / "SciPlot.png"
 APP_ICON_ICO = LOGO_DIR / "SciPlot.ico"
@@ -322,6 +326,8 @@ class SciPlotApp(tk.Tk):
         self._build_ui()
         self._load_last_session()
         self._apply_window_icon()
+        if visible:
+            self.after(AUTO_UPDATE_CHECK_DELAY_MS, self._maybe_auto_check_for_updates)
 
     def _set_initial_geometry(self) -> None:
         screen_w = self.winfo_screenwidth()
@@ -2150,16 +2156,56 @@ class SciPlotApp(tk.Tk):
         y_cols = settings.get("y_cols") or []
         self._select_y_columns([col for col in y_cols if col in self.numeric_columns()])
 
-    def check_for_updates(self) -> None:
+    def _read_update_state(self) -> dict[str, Any]:
+        try:
+            if UPDATE_STATE_PATH.exists():
+                state = json.loads(UPDATE_STATE_PATH.read_text(encoding="utf-8"))
+                if isinstance(state, dict):
+                    return state
+        except (OSError, json.JSONDecodeError):
+            pass
+        return {}
+
+    def _write_update_state(self, state: dict[str, Any]) -> None:
+        try:
+            temp_path = UPDATE_STATE_PATH.with_suffix(".tmp")
+            temp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+            temp_path.replace(UPDATE_STATE_PATH)
+        except OSError:
+            pass
+
+    def _auto_update_check_due(self) -> bool:
+        state = self._read_update_state()
+        try:
+            last_check = float(state.get("last_auto_check", 0))
+        except (TypeError, ValueError):
+            last_check = 0
+        return time.time() - last_check >= AUTO_UPDATE_CHECK_INTERVAL_SECONDS
+
+    def _mark_auto_update_check_attempt(self) -> None:
+        state = self._read_update_state()
+        state["last_auto_check"] = time.time()
+        state["app_version"] = APP_VERSION
+        self._write_update_state(state)
+
+    def _maybe_auto_check_for_updates(self) -> None:
+        if self._update_check_running or not self._auto_update_check_due():
+            return
+        self._mark_auto_update_check_attempt()
+        self.check_for_updates(silent=True)
+
+    def check_for_updates(self, silent: bool = False) -> None:
         if self._update_check_running:
-            self.set_status("正在檢查更新，請稍候。")
+            if not silent:
+                self.set_status("正在檢查更新，請稍候。")
             return
         self._update_check_running = True
-        self.set_status("正在檢查 GitHub 最新版本...")
-        thread = threading.Thread(target=self._check_for_updates_worker, daemon=True)
+        if not silent:
+            self.set_status("正在檢查 GitHub 最新版本...")
+        thread = threading.Thread(target=self._check_for_updates_worker, args=(silent,), daemon=True)
         thread.start()
 
-    def _check_for_updates_worker(self) -> None:
+    def _check_for_updates_worker(self, silent: bool) -> None:
         try:
             request = urllib.request.Request(
                 GITHUB_LATEST_RELEASE_API,
@@ -2167,24 +2213,32 @@ class SciPlotApp(tk.Tk):
             )
             with urllib.request.urlopen(request, timeout=15) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-            self.after(0, lambda: self._handle_update_result(payload, None))
+            self.after(0, lambda: self._handle_update_result(payload, None, silent))
         except Exception as exc:
-            self.after(0, lambda: self._handle_update_result(None, exc))
+            try:
+                self.after(0, lambda exc=exc: self._handle_update_result(None, exc, silent))
+            except RuntimeError:
+                pass
 
-    def _handle_update_result(self, release: dict[str, Any] | None, error: Exception | None) -> None:
+    def _handle_update_result(self, release: dict[str, Any] | None, error: Exception | None, silent: bool = False) -> None:
         self._update_check_running = False
         if error is not None or not release:
+            if silent:
+                return
             self.set_status("更新檢查失敗。")
             messagebox.showerror("檢查更新失敗", f"無法連接 GitHub Releases：\n{error}")
             return
         latest_version = str(release.get("tag_name") or release.get("name") or "").lstrip("v")
         if not latest_version:
+            if silent:
+                return
             self.set_status("未找到可用更新。")
             messagebox.showinfo("檢查更新", "未找到可用的正式版本。")
             return
         if not self._is_newer_version(latest_version, APP_VERSION):
             self.set_status(f"已是最新版本：{APP_VERSION}")
-            messagebox.showinfo("檢查更新", f"目前已是最新版本：{APP_VERSION}")
+            if not silent:
+                messagebox.showinfo("檢查更新", f"目前已是最新版本：{APP_VERSION}")
             return
 
         asset = self._preferred_update_asset(release.get("assets") or [])
@@ -2255,7 +2309,7 @@ class SciPlotApp(tk.Tk):
                     file.write(chunk)
             self.after(0, lambda: self._handle_update_downloaded(destination, None))
         except Exception as exc:
-            self.after(0, lambda: self._handle_update_downloaded(destination, exc))
+            self.after(0, lambda exc=exc: self._handle_update_downloaded(destination, exc))
 
     def _handle_update_downloaded(self, path: Path, error: Exception | None) -> None:
         if error is not None:

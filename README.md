@@ -70,7 +70,7 @@ If you install SciPlot from an MSI or DMG file, you do not need to clone the sou
 
 SciPlot starts with an empty workspace on first launch. After the first chart is generated, the next launch restores the most recently generated chart.
 
-To check for a newer official release, use **Help > Check for Updates** or the **Check for Updates** card on the Home page. On Windows, SciPlot can download the latest MSI installer and open it for installation.
+SciPlot checks for official release updates in the background after launch, at most once every 24 hours. If the installed version is current, it stays quiet. If a newer release is available, SciPlot shows an update prompt and can download the latest Windows MSI or macOS DMG installer. You can also check manually with **Help > Check for Updates** or the **Check for Updates** card on the Home page.
 
 ## Data Format
 
