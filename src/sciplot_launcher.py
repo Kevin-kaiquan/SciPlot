@@ -6,6 +6,7 @@ import traceback
 from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
+from PIL import Image, ImageTk
 
 
 APP_TITLE = "SciPlot 正在啟動"
@@ -36,11 +37,23 @@ def _apply_splash_icon(window: tk.Tk) -> None:
         pass
 
 
+def _load_splash_logo(max_size: int) -> ImageTk.PhotoImage | None:
+    try:
+        png = _resource_path("logo", "SciPlot.png")
+        if not png.exists():
+            return None
+        image = Image.open(png).convert("RGBA")
+        image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+        return ImageTk.PhotoImage(image)
+    except Exception:
+        return None
+
+
 def run_with_splash() -> None:
     splash = tk.Tk()
     splash.title(APP_TITLE)
     _apply_splash_icon(splash)
-    splash.geometry("420x180")
+    splash.geometry("460x250")
     splash.resizable(False, False)
     splash.configure(bg="#f8fafc")
 
@@ -51,10 +64,20 @@ def run_with_splash() -> None:
     y = (splash.winfo_screenheight() // 2) - (height // 2)
     splash.geometry(f"{width}x{height}+{x}+{y}")
 
-    frame = ttk.Frame(splash, padding=24)
+    frame = tk.Frame(splash, bg="#f8fafc", padx=26, pady=22)
     frame.pack(fill="both", expand=True)
-    ttk.Label(frame, text="SciPlot", font=("Microsoft YaHei UI", 15, "bold")).pack(anchor="w")
-    ttk.Label(frame, text="正在載入科研繪圖引擎，首次啟動可能需要十幾秒。").pack(anchor="w", pady=(12, 10))
+    logo_image = _load_splash_logo(82)
+    if logo_image is not None:
+        splash._logo_image = logo_image
+        tk.Label(frame, image=logo_image, bg="#f8fafc", borderwidth=0).pack(anchor="center", pady=(0, 8))
+    tk.Label(frame, text="SciPlot", bg="#f8fafc", fg="#0f172a", font=("Microsoft YaHei UI", 18, "bold")).pack(anchor="center")
+    tk.Label(
+        frame,
+        text="正在載入科研繪圖引擎，首次啟動可能需要十幾秒。",
+        bg="#f8fafc",
+        fg="#475569",
+        font=("Microsoft YaHei UI", 10),
+    ).pack(anchor="center", pady=(12, 12))
     progress = ttk.Progressbar(frame, mode="indeterminate")
     progress.pack(fill="x")
     progress.start(12)

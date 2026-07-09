@@ -17,7 +17,7 @@ from typing import Any
 
 
 APP_NAME = "SciPlot"
-APP_VERSION = "2.1.5"
+APP_VERSION = "2.1.6"
 MAX_SESSION_RECORDS = 5000
 GITHUB_RELEASES_URL = "https://github.com/Kevin-kaiquan/SciPlot/releases"
 GITHUB_LATEST_RELEASE_API = "https://api.github.com/repos/Kevin-kaiquan/SciPlot/releases/latest"
@@ -73,6 +73,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - required for PyInstaller 3D projection collection
+from PIL import Image, ImageTk
 
 
 RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", APP_HOME))
@@ -333,6 +334,16 @@ class SciPlotApp(tk.Tk):
         except tk.TclError:
             pass
 
+    def _load_logo_photo(self, max_size: int) -> ImageTk.PhotoImage | None:
+        try:
+            if not APP_ICON_PNG.exists():
+                return None
+            image = Image.open(APP_ICON_PNG).convert("RGBA")
+            image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+            return ImageTk.PhotoImage(image)
+        except Exception:
+            return None
+
     def _build_style(self) -> None:
         self.colors = {
             "app": "#f3f6fb",
@@ -425,20 +436,33 @@ class SciPlotApp(tk.Tk):
         self.navigate("home")
 
     def _build_sidebar(self) -> None:
-        sidebar = tk.Frame(self, bg=self.colors["sidebar"], width=128)
+        sidebar = tk.Frame(self, bg=self.colors["sidebar"], width=168)
         sidebar.grid(row=0, column=0, sticky="ns")
         sidebar.grid_propagate(False)
         sidebar.columnconfigure(0, weight=1)
 
-        brand = tk.Label(
-            sidebar,
+        brand = tk.Frame(sidebar, bg=self.colors["sidebar"])
+        brand.grid(row=0, column=0, sticky="ew", padx=10, pady=(18, 12))
+        brand.columnconfigure(0, weight=1)
+        self._sidebar_logo_image = self._load_logo_photo(88)
+        if self._sidebar_logo_image is not None:
+            tk.Label(brand, image=self._sidebar_logo_image, bg=self.colors["sidebar"], borderwidth=0).grid(
+                row=0, column=0, pady=(0, 8)
+            )
+        tk.Label(
+            brand,
             text="SciPlot",
             bg=self.colors["sidebar"],
             fg="#ffffff",
-            font=("Microsoft YaHei UI", 13, "bold"),
-            pady=22,
-        )
-        brand.grid(row=0, column=0, sticky="ew")
+            font=("Microsoft YaHei UI", 15, "bold"),
+        ).grid(row=1, column=0)
+        tk.Label(
+            brand,
+            text=f"v{APP_VERSION}",
+            bg=self.colors["sidebar"],
+            fg="#9fb5d9",
+            font=("Microsoft YaHei UI", 8),
+        ).grid(row=2, column=0, pady=(2, 0))
 
         nav_items = [
             ("home", "首頁"),
@@ -522,16 +546,17 @@ class SciPlotApp(tk.Tk):
         parent.rowconfigure(3, weight=1)
 
         actions = [
-            ("導入數據", "CSV、TSV、TXT、Excel", self.open_data),
-            ("新建圖表", "從示例或當前數據開始", lambda: self.navigate("plot")),
-            ("高級圖表", "3D、密度、極坐標、統計分布", lambda: self.navigate("plot")),
-            ("導入模板", "使用共享的 JSON 模板", self.import_template),
-            ("檢查更新", "從 GitHub 下載最新安裝包", self.check_for_updates),
+            ("導入數據", "CSV、TSV、TXT、Excel", "載入數據", self.open_data),
+            ("示例數據", "快速載入內置測試數據", "載入示例", self.load_sample_data),
+            ("新建圖表", "從示例或當前數據開始", "開始繪圖", lambda: self.navigate("plot")),
+            ("高級圖表", "3D、密度、極坐標、統計分布", "選擇圖表", lambda: self.navigate("plot")),
+            ("導入模板", "使用共享的 JSON 模板", "導入模板", self.import_template),
+            ("檢查更新", "從 GitHub 下載最新安裝包", "檢查更新", self.check_for_updates),
         ]
-        for index, (title, desc, command) in enumerate(actions):
+        for index, (title, desc, action, command) in enumerate(actions):
             row = index // 2
             col = index % 2
-            card = self._home_action_card(parent, title, desc, command)
+            card = self._home_action_card(parent, title, desc, action, command)
             card.grid(row=row, column=col, sticky="nsew", padx=(0 if col == 0 else 8, 0 if col == 1 else 8), pady=(0, 14))
 
         recent_projects = self._home_list_panel(parent, "最近項目")
@@ -542,7 +567,7 @@ class SciPlotApp(tk.Tk):
         recent_files.grid(row=3, column=1, sticky="nsew", padx=(8, 0), pady=(2, 0))
         self.recent_files_frame = recent_files.body
 
-    def _home_action_card(self, parent: ttk.Frame, title: str, description: str, command: Any) -> tk.Frame:
+    def _home_action_card(self, parent: ttk.Frame, title: str, description: str, action: str, command: Any) -> tk.Frame:
         card = tk.Frame(parent, bg=self.colors["surface"], highlightthickness=1, highlightbackground=self.colors["border"])
         card.configure(width=260, height=158)
         card.grid_propagate(False)
@@ -561,7 +586,21 @@ class SciPlotApp(tk.Tk):
         ).grid(
             row=1, column=0, sticky="w", padx=20
         )
-        ttk.Button(card, text="開始", style="Tool.TButton", command=command).grid(row=2, column=0, sticky="ew", padx=20, pady=(18, 18))
+        button = tk.Button(
+            card,
+            text=action,
+            command=command,
+            bg=self.colors["primary"],
+            fg="#ffffff",
+            activebackground=self.colors["primary_dark"],
+            activeforeground="#ffffff",
+            relief="flat",
+            borderwidth=0,
+            cursor="hand2",
+            font=("Microsoft YaHei UI", 10, "bold"),
+            pady=8,
+        )
+        button.grid(row=2, column=0, sticky="ew", padx=20, pady=(18, 18))
         return card
 
     def _home_list_panel(self, parent: ttk.Frame, title: str) -> tk.Frame:

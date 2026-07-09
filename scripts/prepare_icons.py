@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageFilter
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,6 +11,34 @@ SOURCE = LOGO_DIR / "SciPlot.jpg"
 PNG = LOGO_DIR / "SciPlot.png"
 ICO = LOGO_DIR / "SciPlot.ico"
 ICNS = LOGO_DIR / "SciPlot.icns"
+
+
+def remove_white_background(image: Image.Image) -> Image.Image:
+    rgba = image.convert("RGBA")
+    color_pixels = []
+    alpha_values = []
+    data = rgba.get_flattened_data() if hasattr(rgba, "get_flattened_data") else rgba.getdata()
+    for red, green, blue, alpha in data:
+        white_distance = ((255 - red) ** 2 + (255 - green) ** 2 + (255 - blue) ** 2) ** 0.5
+        if white_distance <= 24:
+            new_alpha = 0
+        elif white_distance >= 96:
+            new_alpha = alpha
+        else:
+            new_alpha = int((white_distance - 24) / 72 * 255)
+        if 0 < new_alpha < 255:
+            coverage = new_alpha / 255
+            red = int(max(0, min(255, (red - 255 * (1 - coverage)) / coverage)))
+            green = int(max(0, min(255, (green - 255 * (1 - coverage)) / coverage)))
+            blue = int(max(0, min(255, (blue - 255 * (1 - coverage)) / coverage)))
+        color_pixels.append((red, green, blue, alpha))
+        alpha_values.append(min(alpha, max(0, min(255, new_alpha))))
+    rgba.putdata(color_pixels)
+    alpha_mask = Image.new("L", rgba.size)
+    alpha_mask.putdata(alpha_values)
+    alpha_mask = alpha_mask.filter(ImageFilter.MedianFilter(3)).filter(ImageFilter.GaussianBlur(0.2))
+    rgba.putalpha(alpha_mask)
+    return rgba
 
 
 def main() -> None:
@@ -23,6 +51,7 @@ def main() -> None:
     left = (image.width - size) // 2
     top = (image.height - size) // 2
     image = image.crop((left, top, left + size, top + size)).resize((1024, 1024), Image.Resampling.LANCZOS)
+    image = remove_white_background(image)
 
     image.save(PNG)
     image.save(ICO, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
