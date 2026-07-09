@@ -7,7 +7,7 @@ $Staging = Join-Path $MsiRoot "staging\SciPlot"
 $WxsPath = Join-Path $MsiRoot "SciPlot.wxs"
 $LicensePath = Join-Path $MsiRoot "License.rtf"
 $OutputPath = Join-Path $Root "dist\SciPlot-Windows-x64.msi"
-$ProductVersion = "2.1.4"
+$ProductVersion = "2.1.5"
 $UpgradeCode = "AE751FD0-B9E6-410E-9F39-4A7BA2758F66"
 $WixVersion = "5.0.2"
 
@@ -114,6 +114,7 @@ foreach ($componentId in $componentIds) {
     $componentRefs.Add("      <ComponentRef Id=`"$componentId`" />")
 }
 $componentRefs.Add("      <ComponentRef Id=`"StartMenuShortcut`" />")
+$componentRefs.Add("      <ComponentRef Id=`"DesktopShortcut`" />")
 
 $wxs = New-Object System.Collections.Generic.List[string]
 $wxs.Add("<?xml version=`"1.0`" encoding=`"UTF-8`"?>")
@@ -139,6 +140,13 @@ $wxs.Add("          <RemoveFolder Id=`"RemoveApplicationProgramsFolder`" On=`"un
 $wxs.Add("          <RegistryValue Root=`"HKLM`" Key=`"Software\SciPlot`" Name=`"installed`" Type=`"integer`" Value=`"1`" KeyPath=`"yes`" />")
 $wxs.Add("        </Component>")
 $wxs.Add("      </Directory>")
+$wxs.Add("    </StandardDirectory>")
+$wxs.Add("    <StandardDirectory Id=`"DesktopFolder`">")
+$desktopGuid = New-StableGuid "DesktopShortcut"
+$wxs.Add("      <Component Id=`"DesktopShortcut`" Guid=`"{$desktopGuid}`">")
+$wxs.Add("        <Shortcut Id=`"ApplicationDesktopShortcut`" Name=`"SciPlot`" Description=`"Create scientific plots`" Target=`"[INSTALLFOLDER]SciPlot.exe`" WorkingDirectory=`"INSTALLFOLDER`" />")
+$wxs.Add("        <RegistryValue Root=`"HKLM`" Key=`"Software\SciPlot`" Name=`"desktopShortcut`" Type=`"integer`" Value=`"1`" KeyPath=`"yes`" />")
+$wxs.Add("      </Component>")
 $wxs.Add("    </StandardDirectory>")
 $wxs.Add("    <Feature Id=`"MainFeature`" Title=`"SciPlot`" Level=`"1`">")
 foreach ($line in $componentRefs) {

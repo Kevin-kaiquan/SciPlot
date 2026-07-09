@@ -2,16 +2,25 @@ from __future__ import annotations
 
 import json
 import os
+import platform
+import re
+import subprocess
 import sys
+import threading
+import urllib.error
+import urllib.request
 import warnings
+import webbrowser
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any
 
 
 APP_NAME = "SciPlot"
-APP_VERSION = "2.1.4"
+APP_VERSION = "2.1.5"
 MAX_SESSION_RECORDS = 5000
+GITHUB_RELEASES_URL = "https://github.com/Kevin-kaiquan/SciPlot/releases"
+GITHUB_LATEST_RELEASE_API = "https://api.github.com/repos/Kevin-kaiquan/SciPlot/releases/latest"
 
 
 def get_app_home() -> Path:
@@ -292,6 +301,7 @@ class SciPlotApp(tk.Tk):
         self.df = pd.DataFrame()
         self.data_source = ""
         self._numeric_cache: dict[str, pd.Series] = {}
+        self._update_check_running = False
         self.figure: Figure | None = None
         self.canvas_widget: FigureCanvasTkAgg | None = None
         self.toolbar: NavigationToolbar2Tk | None = None
@@ -516,6 +526,7 @@ class SciPlotApp(tk.Tk):
             ("新建圖表", "從示例或當前數據開始", lambda: self.navigate("plot")),
             ("高級圖表", "3D、密度、極坐標、統計分布", lambda: self.navigate("plot")),
             ("導入模板", "使用共享的 JSON 模板", self.import_template),
+            ("檢查更新", "從 GitHub 下載最新安裝包", self.check_for_updates),
         ]
         for index, (title, desc, command) in enumerate(actions):
             row = index // 2
@@ -524,11 +535,11 @@ class SciPlotApp(tk.Tk):
             card.grid(row=row, column=col, sticky="nsew", padx=(0 if col == 0 else 8, 0 if col == 1 else 8), pady=(0, 14))
 
         recent_projects = self._home_list_panel(parent, "最近項目")
-        recent_projects.grid(row=2, column=0, sticky="nsew", padx=(0, 8), pady=(2, 0))
+        recent_projects.grid(row=3, column=0, sticky="nsew", padx=(0, 8), pady=(2, 0))
         self.recent_projects_frame = recent_projects.body
 
         recent_files = self._home_list_panel(parent, "最近文件")
-        recent_files.grid(row=2, column=1, sticky="nsew", padx=(8, 0), pady=(2, 0))
+        recent_files.grid(row=3, column=1, sticky="nsew", padx=(8, 0), pady=(2, 0))
         self.recent_files_frame = recent_files.body
 
     def _home_action_card(self, parent: ttk.Frame, title: str, description: str, command: Any) -> tk.Frame:
@@ -669,6 +680,8 @@ class SciPlotApp(tk.Tk):
         menu.add_cascade(label="導出", menu=export_menu)
 
         help_menu = tk.Menu(menu, tearoff=0)
+        help_menu.add_command(label="檢查更新", command=self.check_for_updates)
+        help_menu.add_separator()
         help_menu.add_command(label="關於", command=self.show_about)
         menu.add_cascade(label="幫助", menu=help_menu)
         self.configure(menu=menu)
@@ -1997,6 +2010,133 @@ class SciPlotApp(tk.Tk):
         self.apply_template(settings, update_chart_type=False)
         y_cols = settings.get("y_cols") or []
         self._select_y_columns([col for col in y_cols if col in self.numeric_columns()])
+
+    def check_for_updates(self) -> None:
+        if self._update_check_running:
+            self.set_status("正在檢查更新，請稍候。")
+            return
+        self._update_check_running = True
+        self.set_status("正在檢查 GitHub 最新版本...")
+        thread = threading.Thread(target=self._check_for_updates_worker, daemon=True)
+        thread.start()
+
+    def _check_for_updates_worker(self) -> None:
+        try:
+            request = urllib.request.Request(
+                GITHUB_LATEST_RELEASE_API,
+                headers={"Accept": "application/vnd.github+json", "User-Agent": f"SciPlot/{APP_VERSION}"},
+            )
+            with urllib.request.urlopen(request, timeout=15) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            self.after(0, lambda: self._handle_update_result(payload, None))
+        except Exception as exc:
+            self.after(0, lambda: self._handle_update_result(None, exc))
+
+    def _handle_update_result(self, release: dict[str, Any] | None, error: Exception | None) -> None:
+        self._update_check_running = False
+        if error is not None or not release:
+            self.set_status("更新檢查失敗。")
+            messagebox.showerror("檢查更新失敗", f"無法連接 GitHub Releases：\n{error}")
+            return
+        latest_version = str(release.get("tag_name") or release.get("name") or "").lstrip("v")
+        if not latest_version:
+            self.set_status("未找到可用更新。")
+            messagebox.showinfo("檢查更新", "未找到可用的正式版本。")
+            return
+        if not self._is_newer_version(latest_version, APP_VERSION):
+            self.set_status(f"已是最新版本：{APP_VERSION}")
+            messagebox.showinfo("檢查更新", f"目前已是最新版本：{APP_VERSION}")
+            return
+
+        asset = self._preferred_update_asset(release.get("assets") or [])
+        if asset is None:
+            self.set_status(f"發現新版本 {latest_version}。")
+            if messagebox.askyesno("發現新版本", f"SciPlot {latest_version} 已發布。\n\n未找到適合此平台的安裝包。是否打開 Release 頁面？"):
+                webbrowser.open(str(release.get("html_url") or GITHUB_RELEASES_URL))
+            return
+
+        asset_name = str(asset.get("name", ""))
+        if messagebox.askyesno(
+            "發現新版本",
+            f"SciPlot {latest_version} 已發布。\n\n是否下載並開啟安裝包？\n{asset_name}",
+        ):
+            self._start_update_download(asset, latest_version)
+        else:
+            self.set_status(f"發現新版本 {latest_version}，尚未下載。")
+
+    def _version_key(self, value: str) -> tuple[int, int, int]:
+        parts = [int(part) for part in re.findall(r"\d+", value)]
+        parts = (parts + [0, 0, 0])[:3]
+        return parts[0], parts[1], parts[2]
+
+    def _is_newer_version(self, latest: str, current: str) -> bool:
+        return self._version_key(latest) > self._version_key(current)
+
+    def _preferred_update_asset(self, assets: list[dict[str, Any]]) -> dict[str, Any] | None:
+        names = [(asset, str(asset.get("name", "")).lower()) for asset in assets]
+        if sys.platform.startswith("win"):
+            for asset, name in names:
+                if name.endswith(".msi") and "windows" in name:
+                    return asset
+            for asset, name in names:
+                if name.endswith(".msi"):
+                    return asset
+        if sys.platform == "darwin":
+            machine = platform.machine().lower()
+            preferred = "arm64" if machine in {"arm64", "aarch64"} else "intel"
+            for asset, name in names:
+                if name.endswith(".dmg") and preferred in name:
+                    return asset
+            for asset, name in names:
+                if name.endswith(".dmg"):
+                    return asset
+        return None
+
+    def _start_update_download(self, asset: dict[str, Any], latest_version: str) -> None:
+        url = str(asset.get("browser_download_url") or "")
+        asset_name = self._safe_file_stem(str(asset.get("name") or f"SciPlot-{latest_version}"))
+        if not url:
+            messagebox.showerror("下載失敗", "此版本沒有可下載的安裝包連結。")
+            return
+        updates_dir = USER_DATA_DIR / "updates"
+        updates_dir.mkdir(parents=True, exist_ok=True)
+        destination = updates_dir / asset_name
+        self.set_status(f"正在下載 SciPlot {latest_version}...")
+        thread = threading.Thread(target=self._download_update_worker, args=(url, destination), daemon=True)
+        thread.start()
+
+    def _download_update_worker(self, url: str, destination: Path) -> None:
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": f"SciPlot/{APP_VERSION}"})
+            with urllib.request.urlopen(request, timeout=60) as response, destination.open("wb") as file:
+                while True:
+                    chunk = response.read(1024 * 512)
+                    if not chunk:
+                        break
+                    file.write(chunk)
+            self.after(0, lambda: self._handle_update_downloaded(destination, None))
+        except Exception as exc:
+            self.after(0, lambda: self._handle_update_downloaded(destination, exc))
+
+    def _handle_update_downloaded(self, path: Path, error: Exception | None) -> None:
+        if error is not None:
+            self.set_status("更新下載失敗。")
+            messagebox.showerror("下載失敗", f"無法下載安裝包：\n{error}")
+            return
+        self.set_status(f"更新安裝包已下載：{path.name}")
+        if messagebox.askyesno("下載完成", f"安裝包已下載：\n{path}\n\n是否現在開啟？安裝時請先關閉 SciPlot。"):
+            self._open_update_installer(path)
+
+    def _open_update_installer(self, path: Path) -> None:
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(path)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(path)])
+            else:
+                webbrowser.open(path.as_uri())
+        except Exception as exc:
+            messagebox.showerror("開啟失敗", f"無法開啟安裝包：\n{exc}")
 
     def show_about(self) -> None:
         messagebox.showinfo(

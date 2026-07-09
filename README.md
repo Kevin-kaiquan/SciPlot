@@ -39,7 +39,7 @@ If you install SciPlot from an MSI or DMG file, you do not need to clone the sou
 2. Open the installer.
 3. Choose the installation folder when the installer asks for a destination.
 4. Finish the installation.
-5. Launch SciPlot from the Start Menu or from the folder selected during installation.
+5. Launch SciPlot from the desktop shortcut, the Start Menu, or the folder selected during installation.
 
 ### Windows Portable ZIP
 
@@ -69,6 +69,8 @@ If you install SciPlot from an MSI or DMG file, you do not need to clone the sou
 8. Export the chart as PNG, SVG, or PDF.
 
 SciPlot starts with an empty workspace on first launch. After the first chart is generated, the next launch restores the most recently generated chart.
+
+To check for a newer official release, use **Help > Check for Updates** or the **Check for Updates** card on the Home page. On Windows, SciPlot can download the latest MSI installer and open it for installation.
 
 ## Data Format
 

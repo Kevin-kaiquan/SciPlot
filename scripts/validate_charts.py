@@ -111,6 +111,17 @@ def validate_input_guards() -> None:
         app.apply_template({"grid": "False", "width": "not-a-number", "palette": "Missing Palette"})
         if app.grid_var.get():
             raise RuntimeError("template string boolean was not parsed safely")
+        if not app._is_newer_version("2.1.5", "2.1.4") or app._is_newer_version("2.1.4", "2.1.5"):
+            raise RuntimeError("version comparison failed")
+        asset = app._preferred_update_asset(
+            [
+                {"name": "SciPlot-macOS-arm64.dmg"},
+                {"name": "SciPlot-Windows-x64.msi"},
+                {"name": "SciPlot-Windows-x64.zip"},
+            ]
+        )
+        if sys.platform.startswith("win") and (not asset or not str(asset.get("name", "")).endswith(".msi")):
+            raise RuntimeError("Windows update asset selection failed")
 
         app.df = pd.DataFrame(
             {
