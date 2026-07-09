@@ -35,8 +35,26 @@ jobs:
       - name: Validate packaged app
         shell: pwsh
         run: |
+          $env:SCIPLOT_APP_DATA_DIR = Join-Path $env:RUNNER_TEMP "sciplot-smoke"
+          New-Item -ItemType Directory -Path $env:SCIPLOT_APP_DATA_DIR -Force | Out-Null
           .\dist\SciPlot\SciPlot.exe --smoke-test
           .\dist\SciPlot\SciPlot.exe --gui-smoke
+
+      - name: Remove smoke-test state
+        shell: pwsh
+        run: |
+          foreach ($name in @("exports", "runtime", "user_data")) {
+            $path = Join-Path "dist\SciPlot" $name
+            if (Test-Path $path) {
+              Remove-Item -LiteralPath $path -Recurse -Force
+            }
+          }
+          foreach ($name in @("last_session.json", "last_session.tmp")) {
+            $path = Join-Path "dist\SciPlot" $name
+            if (Test-Path $path) {
+              Remove-Item -LiteralPath $path -Force
+            }
+          }
 
       - name: Package Windows build
         shell: pwsh
@@ -108,6 +126,8 @@ jobs:
             --hidden-import "matplotlib.backends.backend_pdf" \
             --hidden-import "matplotlib.backends.backend_ps" \
             --hidden-import "matplotlib.backends.backend_svg" \
+            --hidden-import "openpyxl" \
+            --hidden-import "xlrd" \
             --distpath dist \
             --workpath build \
             --specpath . \

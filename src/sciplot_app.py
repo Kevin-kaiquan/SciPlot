@@ -10,7 +10,8 @@ from typing import Any
 
 
 APP_NAME = "SciPlot"
-APP_VERSION = "2.1.3"
+APP_VERSION = "2.1.4"
+MAX_SESSION_RECORDS = 5000
 
 
 def get_app_home() -> Path:
@@ -34,6 +35,9 @@ def can_write_to(directory: Path) -> bool:
 
 
 def get_user_data_home() -> Path:
+    override = os.environ.get("SCIPLOT_APP_DATA_DIR")
+    if override:
+        return Path(override).expanduser()
     if not getattr(sys, "frozen", False):
         return APP_HOME
     if not (APP_HOME / "sciplot_installed.flag").exists() and can_write_to(APP_HOME):
@@ -287,6 +291,7 @@ class SciPlotApp(tk.Tk):
 
         self.df = pd.DataFrame()
         self.data_source = ""
+        self._numeric_cache: dict[str, pd.Series] = {}
         self.figure: Figure | None = None
         self.canvas_widget: FigureCanvasTkAgg | None = None
         self.toolbar: NavigationToolbar2Tk | None = None
@@ -903,6 +908,34 @@ class SciPlotApp(tk.Tk):
                 names.append(path.stem)
         return names
 
+    def _normalize_chart_type(self, value: Any) -> str:
+        if value in CHART_TYPES:
+            return str(value)
+        if isinstance(value, str):
+            for label, chart_key in CHART_TYPES.items():
+                if value == chart_key:
+                    return label
+        return self.current_settings.chart_type
+
+    def _read_template_file(self, path: Path) -> dict[str, Any]:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("Template JSON must contain an object.")
+        return data
+
+    def _template_number(self, template: dict[str, Any], key: str, variable: tk.Variable, cast: Any) -> Any:
+        fallback = variable.get()
+        try:
+            return cast(template.get(key, fallback))
+        except (TypeError, ValueError, tk.TclError):
+            return fallback
+
+    def _template_bool(self, template: dict[str, Any], key: str, variable: tk.Variable) -> bool:
+        value = template.get(key, variable.get())
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+        return bool(value)
+
     def _load_last_session(self) -> None:
         if not STATE_PATH.exists():
             self.set_status("就緒。載入數據後可生成圖表。")
@@ -911,11 +944,16 @@ class SciPlotApp(tk.Tk):
             payload = json.loads(STATE_PATH.read_text(encoding="utf-8"))
             records = payload.get("records") or []
             columns = payload.get("columns") or None
-            if not records:
+            source = payload.get("data_source", "")
+            if records:
+                self.df = pd.DataFrame(records, columns=columns)
+                self.data_source = source
+            elif source and Path(source).exists():
+                self.df = self._read_data_file(Path(source))
+                self.data_source = source
+            else:
                 self.set_status("就緒。載入數據後可生成圖表。")
                 return
-            self.df = pd.DataFrame(records, columns=columns)
-            self.data_source = payload.get("data_source", "")
             self.source_var.set(self.data_source or "上次會話")
             self.refresh_after_data_load()
             self.restore_settings(payload.get("settings", {}))
@@ -974,14 +1012,45 @@ class SciPlotApp(tk.Tk):
         if suffix in {".xlsx", ".xls"}:
             df = pd.read_excel(path)
         elif suffix == ".tsv":
-            df = pd.read_csv(path, sep="\t")
+            df = self._read_text_table(path, sep="\t")
+        elif suffix == ".csv":
+            df = self._read_text_table(path, sep=",", allow_sniff=True)
         else:
-            df = pd.read_csv(path, sep=None, engine="python")
+            df = self._read_text_table(path, sep=None, allow_sniff=True)
         if df.empty or len(df.columns) == 0:
             raise ValueError("文件沒有可用數據。")
         return df
 
+    def _read_text_table(self, path: Path, sep: str | None, allow_sniff: bool = False) -> pd.DataFrame:
+        last_error: Exception | None = None
+        encodings = ("utf-8-sig", "utf-8", "gb18030", "cp1252")
+        for encoding in encodings:
+            try:
+                if sep is None:
+                    return pd.read_csv(path, sep=None, engine="python", encoding=encoding)
+                df = pd.read_csv(path, sep=sep, encoding=encoding)
+                if allow_sniff and len(df.columns) <= 1:
+                    sniffed = pd.read_csv(path, sep=None, engine="python", encoding=encoding)
+                    if len(sniffed.columns) > len(df.columns):
+                        return sniffed
+                return df
+            except UnicodeDecodeError as exc:
+                last_error = exc
+                continue
+            except pd.errors.ParserError as exc:
+                last_error = exc
+                if allow_sniff:
+                    try:
+                        return pd.read_csv(path, sep=None, engine="python", encoding=encoding)
+                    except Exception as sniff_exc:
+                        last_error = sniff_exc
+                continue
+        if last_error is not None:
+            raise last_error
+        raise ValueError("文件無法讀取。")
+
     def refresh_after_data_load(self) -> None:
+        self._numeric_cache.clear()
         self.df.columns = self._make_unique_columns([str(col).strip() or "Column" for col in self.df.columns])
         self.data_stats_var.set(f"行數：{len(self.df):,}｜欄數：{len(self.df.columns):,}")
         self.update_column_controls()
@@ -1037,7 +1106,7 @@ class SciPlotApp(tk.Tk):
     def numeric_columns(self) -> list[str]:
         cols = []
         for col in self.df.columns:
-            series = pd.to_numeric(self.df[col], errors="coerce")
+            series = self._numeric_series(str(col))
             if series.notna().sum() > 0:
                 cols.append(str(col))
         return cols
@@ -1163,14 +1232,22 @@ class SciPlotApp(tk.Tk):
     def _save_last_session(self, settings: PlotSettings) -> None:
         if self.df.empty:
             return
+        source_path = Path(self.data_source) if self.data_source else None
+        source_exists = bool(source_path and source_path.exists())
+        include_records = len(self.df) <= MAX_SESSION_RECORDS or not source_exists
         payload = {
             "app": APP_NAME,
             "version": APP_VERSION,
             "data_source": self.data_source,
             "columns": list(self.df.columns),
-            "records": self.df.replace({np.nan: None}).to_dict(orient="records"),
+            "row_count": len(self.df),
+            "records": self.df.replace({np.nan: None}).to_dict(orient="records") if include_records else [],
             "settings": asdict(settings),
         }
+        if source_exists and source_path is not None:
+            stat = source_path.stat()
+            payload["source_mtime_ns"] = stat.st_mtime_ns
+            payload["source_size"] = stat.st_size
         try:
             temp_path = STATE_PATH.with_suffix(".tmp")
             temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1233,10 +1310,26 @@ class SciPlotApp(tk.Tk):
             self._plot_xy(ax, settings, colors, mode="line")
 
     def _numeric_series(self, col: str) -> pd.Series:
-        return pd.to_numeric(self.df[col], errors="coerce")
+        if col not in self._numeric_cache:
+            self._numeric_cache[col] = pd.to_numeric(self.df[col], errors="coerce")
+        return self._numeric_cache[col]
 
     def _numeric_frame(self, cols: list[str]) -> pd.DataFrame:
         return self.df[cols].apply(pd.to_numeric, errors="coerce").dropna()
+
+    def _triangulation_frame(self, x_col: str, y_col: str, z_col: str) -> tuple[pd.DataFrame, mtri.Triangulation]:
+        frame = self._numeric_frame([x_col, y_col, z_col])
+        frame = frame.groupby([x_col, y_col], as_index=False)[z_col].mean()
+        if len(frame) < 3:
+            raise ValueError("等高線或曲面圖至少需要三個不同的有效 X/Y 數據點。")
+        points = frame[[x_col, y_col]].to_numpy(dtype=float)
+        if np.linalg.matrix_rank(points - points.mean(axis=0)) < 2:
+            raise ValueError("等高線或曲面圖需要非共線的 X/Y 數據點。")
+        try:
+            triangulation = mtri.Triangulation(frame[x_col], frame[y_col])
+        except (RuntimeError, ValueError) as exc:
+            raise ValueError("等高線或曲面圖需要非重合且分布有效的 X/Y 數據點。") from exc
+        return frame, triangulation
 
     def _scaled_sizes(self, settings: PlotSettings, default: float = 40.0) -> pd.Series | float:
         if not settings.size_col:
@@ -1486,10 +1579,7 @@ class SciPlotApp(tk.Tk):
 
     def _plot_contour(self, ax: Any, settings: PlotSettings, filled: bool) -> None:
         y_col = (settings.y_cols or [""])[0]
-        frame = self._numeric_frame([settings.x_col, y_col, settings.z_col])
-        if len(frame) < 3:
-            raise ValueError("等高線圖至少需要三個有效數據點。")
-        triangulation = mtri.Triangulation(frame[settings.x_col], frame[y_col])
+        frame, triangulation = self._triangulation_frame(settings.x_col, y_col, settings.z_col)
         if filled:
             artist = ax.tricontourf(triangulation, frame[settings.z_col], levels=min(settings.bins, 40), cmap="viridis")
         else:
@@ -1535,6 +1625,8 @@ class SciPlotApp(tk.Tk):
     def _plot_3d(self, ax: Any, settings: PlotSettings, colors: list[str], chart_key: str) -> None:
         y_col = (settings.y_cols or [""])[0]
         frame = self._numeric_frame([settings.x_col, y_col, settings.z_col])
+        if frame.empty:
+            raise ValueError("3D 圖表需要有效的 X、Y 和 Z 數值。")
         x = frame[settings.x_col]
         y = frame[y_col]
         z = frame[settings.z_col]
@@ -1547,7 +1639,8 @@ class SciPlotApp(tk.Tk):
         elif chart_key == "line3d":
             ax.plot(x, y, z, color=colors[0], linewidth=settings.line_width, marker=settings.marker or None, label=y_col)
         elif chart_key in {"surface3d", "wireframe3d", "contour3d"}:
-            triangulation = mtri.Triangulation(x, y)
+            frame, triangulation = self._triangulation_frame(settings.x_col, y_col, settings.z_col)
+            z = frame[settings.z_col]
             if chart_key == "surface3d":
                 artist = ax.plot_trisurf(triangulation, z, cmap="viridis", alpha=0.88, linewidth=0.25)
                 self._add_colorbar(ax, artist, settings.z_col)
@@ -1632,7 +1725,7 @@ class SciPlotApp(tk.Tk):
         if template is None:
             path = TEMPLATE_DIR / f"{name}.json"
             if path.exists():
-                template = json.loads(path.read_text(encoding="utf-8"))
+                template = self._read_template_file(path)
         if not template:
             messagebox.showwarning("模板不存在", "沒有找到所選模板。")
             return
@@ -1641,24 +1734,25 @@ class SciPlotApp(tk.Tk):
 
     def apply_template(self, template: dict[str, Any], update_chart_type: bool = False) -> None:
         if update_chart_type and template.get("chart_type"):
-            self.chart_type_var.set(template["chart_type"])
-        self.width_var.set(float(template.get("width", self.width_var.get())))
-        self.height_var.set(float(template.get("height", self.height_var.get())))
-        self.dpi_var.set(int(template.get("dpi", self.dpi_var.get())))
-        self.font_size_var.set(int(template.get("font_size", self.font_size_var.get())))
-        self.line_width_var.set(float(template.get("line_width", self.line_width_var.get())))
-        self.marker_size_var.set(float(template.get("marker_size", self.marker_size_var.get())))
+            self.chart_type_var.set(self._normalize_chart_type(template["chart_type"]))
+        self.width_var.set(self._template_number(template, "width", self.width_var, float))
+        self.height_var.set(self._template_number(template, "height", self.height_var, float))
+        self.dpi_var.set(self._template_number(template, "dpi", self.dpi_var, int))
+        self.font_size_var.set(self._template_number(template, "font_size", self.font_size_var, int))
+        self.line_width_var.set(self._template_number(template, "line_width", self.line_width_var, float))
+        self.marker_size_var.set(self._template_number(template, "marker_size", self.marker_size_var, float))
         self.marker_var.set(str(template.get("marker", self.marker_var.get()) or "None"))
-        self.palette_var.set(str(template.get("palette", self.palette_var.get())))
-        self.grid_var.set(bool(template.get("grid", self.grid_var.get())))
-        self.legend_var.set(bool(template.get("legend", self.legend_var.get())))
-        self.tight_layout_var.set(bool(template.get("tight_layout", self.tight_layout_var.get())))
+        palette = str(template.get("palette", self.palette_var.get()))
+        self.palette_var.set(palette if palette in PALETTES else self.palette_var.get())
+        self.grid_var.set(self._template_bool(template, "grid", self.grid_var))
+        self.legend_var.set(self._template_bool(template, "legend", self.legend_var))
+        self.tight_layout_var.set(self._template_bool(template, "tight_layout", self.tight_layout_var))
         if hasattr(self, "bins_var"):
-            self.bins_var.set(int(template.get("bins", self.bins_var.get())))
+            self.bins_var.set(self._template_number(template, "bins", self.bins_var, int))
         if hasattr(self, "elev_var"):
-            self.elev_var.set(int(template.get("elev", self.elev_var.get())))
+            self.elev_var.set(self._template_number(template, "elev", self.elev_var, int))
         if hasattr(self, "azim_var"):
-            self.azim_var.set(int(template.get("azim", self.azim_var.get())))
+            self.azim_var.set(self._template_number(template, "azim", self.azim_var, int))
 
     def save_current_template(self) -> None:
         name = simpledialog.askstring("保存模板", "模板名稱：", parent=self)
@@ -1686,7 +1780,7 @@ class SciPlotApp(tk.Tk):
         if not path:
             return
         try:
-            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            data = self._read_template_file(Path(path))
             name = Path(path).stem
             dest = TEMPLATE_DIR / f"{name}.json"
             dest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1772,8 +1866,15 @@ class SciPlotApp(tk.Tk):
         raw = self.title_var.get().strip() if hasattr(self, "title_var") else ""
         if not raw:
             raw = "sciplot_figure"
-        safe = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in raw).strip("_")
-        return safe or "sciplot_figure"
+        return self._safe_file_stem(raw)
+
+    def _safe_file_stem(self, value: str) -> str:
+        name = Path(value).name.strip()
+        safe = "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in name).strip("._ ")
+        reserved = {"con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "lpt1", "lpt2", "lpt3"}
+        if not safe or safe.lower() in reserved:
+            return "sciplot_figure"
+        return safe[:120]
 
     def _export_from_dialog(
         self,
@@ -1786,7 +1887,7 @@ class SciPlotApp(tk.Tk):
     ) -> None:
         fmt = fmt_var.get().lower()
         folder = Path(folder_var.get()).expanduser()
-        name = name_var.get().strip() or "sciplot_figure"
+        name = self._safe_file_stem(name_var.get().strip() or "sciplot_figure")
         if not name.lower().endswith(f".{fmt}"):
             name = f"{name}.{fmt}"
         try:
@@ -1882,7 +1983,7 @@ class SciPlotApp(tk.Tk):
             messagebox.showerror("載入失敗", f"項目文件無法讀取：\n{exc}")
 
     def restore_settings(self, settings: dict[str, Any]) -> None:
-        self.chart_type_var.set(settings.get("chart_type", self.chart_type_var.get()))
+        self.chart_type_var.set(self._normalize_chart_type(settings.get("chart_type", self.chart_type_var.get())))
         self.x_col_var.set(settings.get("x_col", self.x_col_var.get()))
         self.z_col_var.set(settings.get("z_col", ""))
         self.error_col_var.set(settings.get("error_col", ""))

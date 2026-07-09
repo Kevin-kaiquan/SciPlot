@@ -7,7 +7,7 @@ $Staging = Join-Path $MsiRoot "staging\SciPlot"
 $WxsPath = Join-Path $MsiRoot "SciPlot.wxs"
 $LicensePath = Join-Path $MsiRoot "License.rtf"
 $OutputPath = Join-Path $Root "dist\SciPlot-Windows-x64.msi"
-$ProductVersion = "2.1.3"
+$ProductVersion = "2.1.4"
 $UpgradeCode = "AE751FD0-B9E6-410E-9F39-4A7BA2758F66"
 $WixVersion = "5.0.2"
 
@@ -26,6 +26,18 @@ if (Test-Path $MsiRoot) {
 }
 New-Item -ItemType Directory -Path $Staging | Out-Null
 Copy-Item -Path (Join-Path $DistApp "*") -Destination $Staging -Recurse -Force
+foreach ($name in @("exports", "runtime", "user_data")) {
+    $path = Join-Path $Staging $name
+    if (Test-Path $path) {
+        Remove-Item -LiteralPath $path -Recurse -Force
+    }
+}
+foreach ($name in @("last_session.json", "last_session.tmp")) {
+    $path = Join-Path $Staging $name
+    if (Test-Path $path) {
+        Remove-Item -LiteralPath $path -Force
+    }
+}
 New-Item -ItemType File -Path (Join-Path $Staging "sciplot_installed.flag") -Force | Out-Null
 
 function ConvertTo-WixLiteral([string]$value) {

@@ -45,6 +45,7 @@ def render_all_chart_types() -> None:
                 app.x_col_var.set("time_s")
                 app._select_y_columns(["signal_a"])
 
+            app.figure = None
             app.render_plot(silent=True)
             if app.figure is None:
                 raise RuntimeError("figure was not rendered")
@@ -77,6 +78,7 @@ def render_surface_examples() -> None:
     for chart_key in ["contour", "contourf", "scatter3d", "surface3d", "wireframe3d", "contour3d"]:
         try:
             app.chart_type_var.set(key_to_label[chart_key])
+            app.figure = None
             app.render_plot(silent=True)
             output = EXPORT_DIR / f"validate_surface_{chart_key}.png"
             app.figure.savefig(output, dpi=120, bbox_inches="tight")
@@ -92,7 +94,50 @@ def render_surface_examples() -> None:
         raise SystemExit(1)
 
 
+def validate_input_guards() -> None:
+    app = SciPlotApp(visible=False)
+    try:
+        gbk_path = EXPORT_DIR / "validate_gb18030_semicolon.csv"
+        gbk_path.write_bytes("時間;信號\n0;1.5\n1;2.5\n".encode("gb18030"))
+        df = app._read_data_file(gbk_path)
+        if list(df.columns) != ["時間", "信號"] or len(df) != 2:
+            raise RuntimeError("GB18030 semicolon CSV fallback failed")
+
+        if app._safe_file_stem("CON") != "sciplot_figure":
+            raise RuntimeError("reserved Windows filename was not sanitized")
+        if "\\" in app._safe_file_stem("bad\\name?.png"):
+            raise RuntimeError("unsafe filename separator was not sanitized")
+        app.grid_var.set(True)
+        app.apply_template({"grid": "False", "width": "not-a-number", "palette": "Missing Palette"})
+        if app.grid_var.get():
+            raise RuntimeError("template string boolean was not parsed safely")
+
+        app.df = pd.DataFrame(
+            {
+                "x": [0, 0, 1, 0, 1],
+                "y": [0, 0, 0, 1, 1],
+                "z": [1, 3, 2, 4, 5],
+            }
+        )
+        app.data_source = "duplicate-points"
+        app.source_var.set(app.data_source)
+        app.refresh_after_data_load()
+        app.x_col_var.set("x")
+        app._select_y_columns(["y"])
+        app.z_col_var.set("z")
+        key_to_label = {value: key for key, value in CHART_TYPES.items()}
+        for chart_key in ("contour", "surface3d"):
+            app.chart_type_var.set(key_to_label[chart_key])
+            app.figure = None
+            app.render_plot(silent=True)
+            if app.figure is None:
+                raise RuntimeError(f"{chart_key} duplicate-point render failed")
+    finally:
+        app.destroy()
+
+
 if __name__ == "__main__":
     render_all_chart_types()
     render_surface_examples()
+    validate_input_guards()
     print(f"Validated {len(CHART_TYPES)} chart types.")

@@ -28,6 +28,8 @@ if (-not (Test-Path $Python)) {
     --hidden-import "matplotlib.backends.backend_pdf" `
     --hidden-import "matplotlib.backends.backend_ps" `
     --hidden-import "matplotlib.backends.backend_svg" `
+    --hidden-import "openpyxl" `
+    --hidden-import "xlrd" `
     --distpath (Join-Path $Root "dist") `
     --workpath (Join-Path $Root "build") `
     --specpath $Root `
