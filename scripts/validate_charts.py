@@ -123,6 +123,26 @@ def validate_input_guards() -> None:
         if sys.platform.startswith("win") and (not asset or not str(asset.get("name", "")).endswith(".msi")):
             raise RuntimeError("Windows update asset selection failed")
 
+        key_to_label = {value: key for key, value in CHART_TYPES.items()}
+        app.df = pd.DataFrame({"x": list(range(8)), "signal_a": range(8), "signal_b": [value * 1.4 for value in range(8)]})
+        app.data_source = "manual-layout"
+        app.source_var.set(app.data_source)
+        app.refresh_after_data_load()
+        app.chart_type_var.set(key_to_label["line"])
+        app.x_col_var.set("x")
+        app._select_y_columns(["signal_a", "signal_b"])
+        app.title_var.set("Manual layout validation")
+        app.title_pad_var.set(30)
+        app.axis_label_pad_var.set(18)
+        app.tick_label_pad_var.set(10)
+        app.x_tick_rotation_var.set(45)
+        app.legend_position_var.set("右側")
+        app.margin_right_var.set(0.22)
+        app.figure = None
+        app.render_plot(silent=True)
+        if app.figure is None:
+            raise RuntimeError("manual label layout render failed")
+
         app.df = pd.DataFrame(
             {
                 "x": [0, 0, 1, 0, 1],
@@ -136,7 +156,6 @@ def validate_input_guards() -> None:
         app.x_col_var.set("x")
         app._select_y_columns(["y"])
         app.z_col_var.set("z")
-        key_to_label = {value: key for key, value in CHART_TYPES.items()}
         for chart_key in ("contour", "surface3d"):
             app.chart_type_var.set(key_to_label[chart_key])
             app.figure = None

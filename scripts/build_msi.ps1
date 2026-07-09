@@ -7,7 +7,7 @@ $Staging = Join-Path $MsiRoot "staging\SciPlot"
 $WxsPath = Join-Path $MsiRoot "SciPlot.wxs"
 $LicensePath = Join-Path $MsiRoot "License.rtf"
 $OutputPath = Join-Path $Root "dist\SciPlot-Windows-x64.msi"
-$ProductVersion = "2.1.6"
+$ProductVersion = "2.1.7"
 $UpgradeCode = "AE751FD0-B9E6-410E-9F39-4A7BA2758F66"
 $WixVersion = "5.0.2"
 

@@ -17,7 +17,7 @@ from typing import Any
 
 
 APP_NAME = "SciPlot"
-APP_VERSION = "2.1.6"
+APP_VERSION = "2.1.7"
 MAX_SESSION_RECORDS = 5000
 GITHUB_RELEASES_URL = "https://github.com/Kevin-kaiquan/SciPlot/releases"
 GITHUB_LATEST_RELEASE_API = "https://api.github.com/repos/Kevin-kaiquan/SciPlot/releases/latest"
@@ -262,6 +262,15 @@ class PlotSettings:
     grid: bool = True
     legend: bool = True
     tight_layout: bool = True
+    title_pad: int = 14
+    axis_label_pad: int = 8
+    tick_label_pad: int = 4
+    x_tick_rotation: int = 0
+    legend_position: str = "自動"
+    margin_left: float = 0.0
+    margin_right: float = 0.0
+    margin_top: float = 0.0
+    margin_bottom: float = 0.0
     bins: int = 30
     elev: int = 28
     azim: int = -55
@@ -881,6 +890,36 @@ class SciPlotApp(tk.Tk):
         row += 1
         self.tight_layout_var = tk.BooleanVar(value=self.current_settings.tight_layout)
         ttk.Checkbutton(parent, text="自動緊湊排版", variable=self.tight_layout_var).grid(row=row, column=0, sticky="w", padx=12, pady=4)
+        row += 1
+
+        ttk.Label(parent, text="標籤與留白微調", style="Title.TLabel").grid(row=row, column=0, sticky="w", padx=12, pady=(16, 6))
+        row += 1
+        self.title_pad_var = tk.IntVar(value=self.current_settings.title_pad)
+        self._spin(parent, "標題距離", self.title_pad_var, 0, 80, 1, row)
+        row += 2
+        self.axis_label_pad_var = tk.IntVar(value=self.current_settings.axis_label_pad)
+        self._spin(parent, "軸標籤距離", self.axis_label_pad_var, 0, 60, 1, row)
+        row += 2
+        self.tick_label_pad_var = tk.IntVar(value=self.current_settings.tick_label_pad)
+        self._spin(parent, "刻度文字距離", self.tick_label_pad_var, 0, 40, 1, row)
+        row += 2
+        self.x_tick_rotation_var = tk.IntVar(value=self.current_settings.x_tick_rotation)
+        self._spin(parent, "X 刻度旋轉", self.x_tick_rotation_var, -90, 90, 5, row)
+        row += 2
+        self.legend_position_var = tk.StringVar(value=self.current_settings.legend_position)
+        self._combo(parent, "圖例位置", self.legend_position_var, ["自動", "右上", "右側", "底部", "左上", "無"], row)
+        row += 2
+        self.margin_left_var = tk.DoubleVar(value=self.current_settings.margin_left)
+        self._spin(parent, "左留白（0=自動）", self.margin_left_var, 0.0, 0.45, 0.01, row)
+        row += 2
+        self.margin_right_var = tk.DoubleVar(value=self.current_settings.margin_right)
+        self._spin(parent, "右留白（0=自動）", self.margin_right_var, 0.0, 0.45, 0.01, row)
+        row += 2
+        self.margin_top_var = tk.DoubleVar(value=self.current_settings.margin_top)
+        self._spin(parent, "上留白（0=自動）", self.margin_top_var, 0.0, 0.45, 0.01, row)
+        row += 2
+        self.margin_bottom_var = tk.DoubleVar(value=self.current_settings.margin_bottom)
+        self._spin(parent, "下留白（0=自動）", self.margin_bottom_var, 0.0, 0.45, 0.01, row)
 
     def _build_template_tab(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
@@ -1201,6 +1240,15 @@ class SciPlotApp(tk.Tk):
             grid=bool(self.grid_var.get()),
             legend=bool(self.legend_var.get()),
             tight_layout=bool(self.tight_layout_var.get()),
+            title_pad=self._int_var(self.title_pad_var, 14, 0, 80),
+            axis_label_pad=self._int_var(self.axis_label_pad_var, 8, 0, 60),
+            tick_label_pad=self._int_var(self.tick_label_pad_var, 4, 0, 40),
+            x_tick_rotation=self._int_var(self.x_tick_rotation_var, 0, -90, 90),
+            legend_position=self.legend_position_var.get(),
+            margin_left=self._float_var(self.margin_left_var, 0.0, 0.0, 0.45),
+            margin_right=self._float_var(self.margin_right_var, 0.0, 0.0, 0.45),
+            margin_top=self._float_var(self.margin_top_var, 0.0, 0.0, 0.45),
+            margin_bottom=self._float_var(self.margin_bottom_var, 0.0, 0.0, 0.45),
             bins=self._int_var(self.bins_var, 30, 5, 120),
             elev=self._int_var(self.elev_var, 28, -90, 90),
             azim=self._int_var(self.azim_var, -55, -180, 180),
@@ -1706,21 +1754,32 @@ class SciPlotApp(tk.Tk):
             ax.bar3d(x, y, z_base, dx, dy, z, color=colors[0], alpha=0.72, shade=True)
 
     def _decorate_axes(self, ax: Any, fig: Figure, settings: PlotSettings, chart_key: str) -> None:
-        ax.set_title(settings.title, fontsize=settings.font_size + 2, pad=14, wrap=True)
+        ax.set_title(settings.title, fontsize=settings.font_size + 2, pad=settings.title_pad, wrap=True)
         if chart_key in {"scatter3d", "line3d", "surface3d", "wireframe3d", "bar3d", "contour3d"}:
             ax.set_xlabel(settings.xlabel or settings.x_col)
             ax.set_ylabel(settings.ylabel or ", ".join(settings.y_cols or []))
             ax.set_zlabel(settings.zlabel or settings.z_col)
+            ax.xaxis.labelpad = settings.axis_label_pad
+            ax.yaxis.labelpad = settings.axis_label_pad
+            ax.zaxis.labelpad = settings.axis_label_pad
         elif chart_key not in {"heatmap", "radar", "polar_line", "polar_scatter", "pie", "donut"}:
             ax.set_xlabel(settings.xlabel or settings.x_col)
             ax.set_ylabel(settings.ylabel or ", ".join(settings.y_cols or []))
+            ax.xaxis.labelpad = settings.axis_label_pad
+            ax.yaxis.labelpad = settings.axis_label_pad
+        if hasattr(ax, "tick_params"):
+            ax.tick_params(axis="both", pad=settings.tick_label_pad)
         if settings.grid and chart_key not in {"heatmap", "pie", "donut"}:
             ax.grid(True, color="#d1d5db", linewidth=0.7, alpha=0.75)
         bottom_legend = False
-        if settings.legend and chart_key not in {"heatmap", "pie", "donut"}:
+        if settings.legend and settings.legend_position != "無" and chart_key not in {"heatmap", "pie", "donut"}:
             handles, labels = ax.get_legend_handles_labels()
             if handles and labels:
-                bottom_legend = chart_key not in {"radar", "polar_line", "polar_scatter"} and len(labels) >= 3
+                legend_position = settings.legend_position
+                if legend_position == "自動":
+                    bottom_legend = chart_key not in {"radar", "polar_line", "polar_scatter"} and len(labels) >= 3
+                elif legend_position == "底部":
+                    bottom_legend = True
                 if bottom_legend:
                     ax.legend(
                         frameon=False,
@@ -1730,8 +1789,18 @@ class SciPlotApp(tk.Tk):
                         ncol=min(2, len(labels)),
                         fontsize=max(8, settings.font_size - 1),
                     )
+                elif legend_position == "右側":
+                    ax.legend(
+                        frameon=False,
+                        loc="center left",
+                        bbox_to_anchor=(1.02, 0.5),
+                        borderaxespad=0,
+                        fontsize=max(8, settings.font_size - 1),
+                    )
+                elif legend_position == "左上":
+                    ax.legend(frameon=False, loc="upper left", fontsize=max(8, settings.font_size - 1))
                 else:
-                    ax.legend(frameon=False)
+                    ax.legend(frameon=False, loc="upper right", fontsize=max(8, settings.font_size - 1))
         if chart_key == "heatmap" and getattr(self, "figure_colorbar", None) is not None:
             fig.colorbar(self.figure_colorbar, ax=ax, fraction=0.046, pad=0.04, label="Pearson r")
         if hasattr(ax, "spines"):
@@ -1740,9 +1809,10 @@ class SciPlotApp(tk.Tk):
                 spine.set_linewidth(0.8)
         if chart_key not in {"heatmap", "radar", "polar_line", "polar_scatter", "pie", "donut"}:
             visible_xticks = [tick for tick in ax.get_xticklabels() if tick.get_text()]
-            if len(visible_xticks) > 8:
+            rotation = settings.x_tick_rotation if settings.x_tick_rotation else (30 if len(visible_xticks) > 8 else 0)
+            if rotation:
                 for tick in visible_xticks:
-                    tick.set_rotation(30)
+                    tick.set_rotation(rotation)
                     tick.set_ha("right")
         if settings.tight_layout:
             try:
@@ -1758,6 +1828,17 @@ class SciPlotApp(tk.Tk):
                     fig.subplots_adjust(left=0.14, right=0.94, top=0.86, bottom=0.16)
         if bottom_legend:
             fig.subplots_adjust(bottom=0.28)
+        manual_adjust: dict[str, float] = {}
+        if settings.margin_left > 0:
+            manual_adjust["left"] = settings.margin_left
+        if settings.margin_right > 0:
+            manual_adjust["right"] = 1 - settings.margin_right
+        if settings.margin_top > 0:
+            manual_adjust["top"] = 1 - settings.margin_top
+        if settings.margin_bottom > 0:
+            manual_adjust["bottom"] = settings.margin_bottom
+        if manual_adjust:
+            fig.subplots_adjust(**manual_adjust)
 
     def _show_figure(self, fig: Figure) -> None:
         for child in self.plot_container.winfo_children():
@@ -1799,6 +1880,25 @@ class SciPlotApp(tk.Tk):
         self.grid_var.set(self._template_bool(template, "grid", self.grid_var))
         self.legend_var.set(self._template_bool(template, "legend", self.legend_var))
         self.tight_layout_var.set(self._template_bool(template, "tight_layout", self.tight_layout_var))
+        if hasattr(self, "title_pad_var"):
+            self.title_pad_var.set(self._template_number(template, "title_pad", self.title_pad_var, int))
+        if hasattr(self, "axis_label_pad_var"):
+            self.axis_label_pad_var.set(self._template_number(template, "axis_label_pad", self.axis_label_pad_var, int))
+        if hasattr(self, "tick_label_pad_var"):
+            self.tick_label_pad_var.set(self._template_number(template, "tick_label_pad", self.tick_label_pad_var, int))
+        if hasattr(self, "x_tick_rotation_var"):
+            self.x_tick_rotation_var.set(self._template_number(template, "x_tick_rotation", self.x_tick_rotation_var, int))
+        if hasattr(self, "legend_position_var"):
+            legend_position = str(template.get("legend_position", self.legend_position_var.get()))
+            self.legend_position_var.set(legend_position if legend_position in {"自動", "右上", "右側", "底部", "左上", "無"} else "自動")
+        if hasattr(self, "margin_left_var"):
+            self.margin_left_var.set(self._template_number(template, "margin_left", self.margin_left_var, float))
+        if hasattr(self, "margin_right_var"):
+            self.margin_right_var.set(self._template_number(template, "margin_right", self.margin_right_var, float))
+        if hasattr(self, "margin_top_var"):
+            self.margin_top_var.set(self._template_number(template, "margin_top", self.margin_top_var, float))
+        if hasattr(self, "margin_bottom_var"):
+            self.margin_bottom_var.set(self._template_number(template, "margin_bottom", self.margin_bottom_var, float))
         if hasattr(self, "bins_var"):
             self.bins_var.set(self._template_number(template, "bins", self.bins_var, int))
         if hasattr(self, "elev_var"):

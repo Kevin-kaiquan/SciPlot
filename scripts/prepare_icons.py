@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image, ImageFilter
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +41,25 @@ def remove_white_background(image: Image.Image) -> Image.Image:
     return rgba
 
 
+def make_app_icon(logo: Image.Image) -> Image.Image:
+    canvas = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+    draw.ellipse((70, 70, 954, 954), fill="#102a55")
+    draw.ellipse((88, 88, 936, 936), outline="#22d3ee", width=22)
+
+    icon_logo = logo.copy()
+    icon_logo = ImageEnhance.Brightness(icon_logo).enhance(1.18)
+    icon_logo = ImageEnhance.Contrast(icon_logo).enhance(1.08)
+    bbox = icon_logo.getbbox()
+    if bbox:
+        icon_logo = icon_logo.crop(bbox)
+    icon_logo.thumbnail((730, 730), Image.Resampling.LANCZOS)
+    x = (1024 - icon_logo.width) // 2
+    y = (1024 - icon_logo.height) // 2
+    canvas.alpha_composite(icon_logo, (x, y))
+    return canvas
+
+
 def main() -> None:
     if not SOURCE.exists():
         raise FileNotFoundError(f"Missing icon source: {SOURCE}")
@@ -51,12 +70,13 @@ def main() -> None:
     left = (image.width - size) // 2
     top = (image.height - size) // 2
     image = image.crop((left, top, left + size, top + size)).resize((1024, 1024), Image.Resampling.LANCZOS)
-    image = remove_white_background(image)
+    transparent_logo = remove_white_background(image)
+    app_icon = make_app_icon(transparent_logo)
 
-    image.save(PNG)
-    image.save(ICO, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+    transparent_logo.save(PNG)
+    app_icon.save(ICO, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
     try:
-        image.save(ICNS, sizes=[(16, 16), (32, 32), (64, 64), (128, 128), (256, 256), (512, 512), (1024, 1024)])
+        app_icon.save(ICNS, sizes=[(16, 16), (32, 32), (64, 64), (128, 128), (256, 256), (512, 512), (1024, 1024)])
     except Exception:
         # Pillow's ICNS writer depends on platform/library support. The macOS
         # release workflow can still generate an .icns file with iconutil.
