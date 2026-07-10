@@ -42,7 +42,7 @@ jobs:
           $env:SCIPLOT_APP_DATA_DIR = Join-Path $env:RUNNER_TEMP "sciplot-smoke"
           $env:QT_QPA_PLATFORM = "offscreen"
           New-Item -ItemType Directory -Path $env:SCIPLOT_APP_DATA_DIR -Force | Out-Null
-          foreach ($argument in @("--smoke-test", "--gui-smoke")) {
+          foreach ($argument in @("--smoke-test", "--gui-smoke", "--startup-smoke")) {
             $process = Start-Process -FilePath ".\dist\SciPlot\SciPlot.exe" -ArgumentList $argument -Wait -PassThru
             if ($process.ExitCode -ne 0) {
               $log = Join-Path $env:SCIPLOT_APP_DATA_DIR "runtime\startup_error.log"
@@ -160,6 +160,7 @@ jobs:
           mkdir -p "$SCIPLOT_APP_DATA_DIR"
           dist/SciPlot.app/Contents/MacOS/SciPlot --smoke-test
           dist/SciPlot.app/Contents/MacOS/SciPlot --gui-smoke
+          dist/SciPlot.app/Contents/MacOS/SciPlot --startup-smoke
 
       - name: Package macOS DMG
         run: |

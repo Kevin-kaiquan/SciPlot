@@ -46,3 +46,9 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           SCIPLOT_APP_DATA_DIR: ${{ runner.temp }}/sciplot-gui-smoke
         run: python src/sciplot_app.py --gui-smoke
+
+      - name: Validate startup launcher
+        env:
+          QT_QPA_PLATFORM: offscreen
+          SCIPLOT_APP_DATA_DIR: ${{ runner.temp }}/sciplot-startup-smoke
+        run: python src/sciplot_launcher.py --startup-smoke

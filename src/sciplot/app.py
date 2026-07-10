@@ -4,10 +4,8 @@ import os
 import sys
 import traceback
 
-import pandas as pd
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont, QIcon, QPalette, QPixmap
-from PySide6.QtWidgets import QApplication, QSplashScreen
+from PySide6.QtGui import QColor, QFont, QIcon, QPalette
+from PySide6.QtWidgets import QApplication
 
 from .data_io import read_data_file
 from .main_window import MainWindow
@@ -85,35 +83,14 @@ def create_application() -> QApplication:
 
 def run_application() -> int:
     application = create_application()
-    splash = None
-    if APP_ICON_PNG.exists():
-        pixmap = QPixmap(str(APP_ICON_PNG)).scaled(180, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-        canvas = QPixmap(460, 280)
-        canvas.fill(QColor("#f8fafc"))
-        painter = None
-        try:
-            from PySide6.QtGui import QPainter
-
-            painter = QPainter(canvas)
-            painter.drawPixmap((canvas.width() - pixmap.width()) // 2, 28, pixmap)
-            painter.setPen(QColor("#172033"))
-            painter.setFont(QFont(application.font().family(), 18, QFont.Weight.Bold))
-            painter.drawText(canvas.rect().adjusted(0, 200, 0, -40), Qt.AlignmentFlag.AlignHCenter, APP_NAME)
-        finally:
-            if painter is not None:
-                painter.end()
-        splash = QSplashScreen(canvas)
-        splash.showMessage("Loading scientific plotting workspace...", Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom, QColor("#607086"))
-        splash.show()
-        application.processEvents()
     window = MainWindow()
     window.show()
-    if splash:
-        splash.finish(window)
     return application.exec()
 
 
 def run_smoke_test() -> None:
+    import pandas as pd
+
     sample_path = SAMPLE_DIR / "example_measurements.csv"
     dataframe = read_data_file(sample_path)
     settings = PlotSettings(chart_type="line", x_col="time_s", y_cols=["signal_a", "signal_b"], group_col="group", title="SciPlot 3 smoke test")
@@ -123,6 +100,12 @@ def run_smoke_test() -> None:
         if not output.exists() or output.stat().st_size < 1000:
             raise RuntimeError(f"{suffix.upper()} smoke export failed")
         print(output)
+    density_output = EXPORT_DIR / "density_smoke.png"
+    density_settings = PlotSettings(chart_type="density", y_cols=["signal_a"], title="SciPlot density smoke test")
+    save_figure(dataframe, density_settings, str(density_output), 150)
+    if not density_output.exists() or density_output.stat().st_size < 1000:
+        raise RuntimeError("Packaged SciPy density smoke test failed")
+    print(density_output)
     date_frame = pd.DataFrame({"when": [pd.Timestamp("2026-01-01")], "value": [1.5]})
     restored = dataframe_from_json(dataframe_to_json(date_frame))
     if not pd.api.types.is_datetime64_any_dtype(restored["when"]):

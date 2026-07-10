@@ -7,6 +7,7 @@ SciPlot is offline-first. It has no accounts, payments, advertising, analytics, 
 ## Highlights
 
 - Native desktop interface built with PySide6 and Qt.
+- Immediate startup status window while scientific libraries load, with protection against duplicate launches.
 - Dockable, movable, closable, and resizable data, plot, style, layout, and template panels.
 - English, Traditional Chinese, and Simplified Chinese user interfaces.
 - Background data import, project save/load, figure export, update checks, and installer downloads.

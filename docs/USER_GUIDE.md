@@ -4,6 +4,8 @@
 
 SciPlot opens directly into the figure workspace. The left dock contains data and chart-column controls. The right dock contains style, layout, and template controls. Both docks can be resized, moved, floated, closed, and restored from the View menu.
 
+The startup window appears before the scientific libraries are loaded, so it remains clear that SciPlot is running. The first launch after installation may take longer while the operating system scans the packaged dependencies. Starting SciPlot again while it is already opening or running displays a single-instance notice instead of launching another copy.
+
 ## Import Data
 
 Use **File > Import Data**, the toolbar button, or drag a CSV, TSV, TXT, DAT, XLSX, or XLS file into the window. SciPlot displays the imported table in the Data Preview tab and suggests X, Y, error, Z, and group columns from common column names.

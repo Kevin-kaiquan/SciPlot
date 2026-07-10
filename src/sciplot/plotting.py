@@ -11,7 +11,6 @@ import pandas as pd
 from matplotlib import rc_context
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
-from scipy.stats import gaussian_kde
 
 from .models import CHART_DEFINITIONS, PALETTES, PlotSettings
 
@@ -349,6 +348,8 @@ class PlotEngine:
             axes.hist(values, bins=settings.bins, alpha=0.62, label=column, color=colors[index % len(colors)])
 
     def _plot_density(self, axes: Any, settings: PlotSettings) -> None:
+        from scipy.stats import gaussian_kde
+
         colors = self._colors(settings)
         for index, column in enumerate(settings.y_cols or []):
             values = self._numeric(column).dropna().to_numpy(dtype=float)
