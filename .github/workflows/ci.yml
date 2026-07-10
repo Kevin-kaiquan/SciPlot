@@ -1,0 +1,48 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile sources
+        run: python -m compileall -q src scripts
+
+      - name: Validate chart engine
+        run: python scripts/validate_charts.py
+
+      - name: Validate core exports
+        run: python src/sciplot_app.py --smoke-test
+
+      - name: Validate Qt GUI
+        env:
+          QT_QPA_PLATFORM: offscreen
+          SCIPLOT_APP_DATA_DIR: ${{ runner.temp }}/sciplot-gui-smoke
+        run: python src/sciplot_app.py --gui-smoke

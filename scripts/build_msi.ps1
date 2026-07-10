@@ -7,9 +7,24 @@ $Staging = Join-Path $MsiRoot "staging\SciPlot"
 $WxsPath = Join-Path $MsiRoot "SciPlot.wxs"
 $LicensePath = Join-Path $MsiRoot "License.rtf"
 $OutputPath = Join-Path $Root "dist\SciPlot-Windows-x64.msi"
-$ProductVersion = "2.1.8"
+$VersionFile = Join-Path $Root "src\sciplot\version.py"
+$VersionMatch = Select-String -Path $VersionFile -Pattern '^APP_VERSION\s*=\s*"([^"]+)"$'
+if (-not $VersionMatch) {
+    throw "Unable to read APP_VERSION from src\sciplot\version.py."
+}
+$ProductVersion = $VersionMatch.Matches[0].Groups[1].Value
 $UpgradeCode = "AE751FD0-B9E6-410E-9F39-4A7BA2758F66"
 $WixVersion = "5.0.2"
+$env:DOTNET_CLI_HOME = Join-Path $Root "runtime\dotnet_home"
+$env:NUGET_PACKAGES = Join-Path $Root "runtime\nuget"
+$env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
+$env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = "1"
+$env:DOTNET_NOLOGO = "1"
+$env:TEMP = Join-Path $Root "runtime\temp"
+$env:TMP = $env:TEMP
+foreach ($directory in @($env:DOTNET_CLI_HOME, $env:NUGET_PACKAGES, $env:TEMP)) {
+    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+}
 
 if (-not (Test-Path (Join-Path $DistApp "SciPlot.exe"))) {
     throw "Missing packaged app. Run build_exe.ps1 before scripts\build_msi.ps1."
@@ -122,6 +137,10 @@ $wxs.Add("<Wix xmlns=`"http://wixtoolset.org/schemas/v4/wxs`" xmlns:ui=`"http://
 $wxs.Add("  <Package Name=`"SciPlot`" Manufacturer=`"SciPlot`" Version=`"$ProductVersion`" UpgradeCode=`"{$UpgradeCode}`" Scope=`"perMachine`">")
 $wxs.Add("    <MajorUpgrade DowngradeErrorMessage=`"A newer version of SciPlot is already installed.`" />")
 $wxs.Add("    <MediaTemplate EmbedCab=`"yes`" />")
+$iconSource = ConvertTo-WixLiteral (Join-Path $Root "logo\SciPlot.ico")
+$wxs.Add("    <Icon Id=`"SciPlotIcon`" SourceFile=`"$iconSource`" />")
+$wxs.Add("    <Property Id=`"ARPPRODUCTICON`" Value=`"SciPlotIcon`" />")
+$wxs.Add("    <Property Id=`"ARPURLINFOABOUT`" Value=`"https://github.com/Kevin-kaiquan/SciPlot`" />")
 $wxs.Add("    <ui:WixUI Id=`"WixUI_InstallDir`" InstallDirectory=`"INSTALLFOLDER`" />")
 $wxs.Add("    <WixVariable Id=`"WixUILicenseRtf`" Value=`"$([System.Security.SecurityElement]::Escape($LicensePath))`" />")
 $wxs.Add("    <StandardDirectory Id=`"ProgramFiles64Folder`">")
@@ -161,13 +180,24 @@ $licenseText = "{\rtf1\ansi\deff0{\fonttbl{\f0 Segoe UI;}}\f0\fs20 SciPlot is pr
 $licenseText | Set-Content -Path $LicensePath -Encoding ASCII
 $wxs | Set-Content -Path $WxsPath -Encoding UTF8
 
-$dotnetSdks = & dotnet --list-sdks 2>$null
+$LocalDotNet = Join-Path $Root ".dotnet\dotnet.exe"
+if (Test-Path $LocalDotNet) {
+    $DotNetExe = $LocalDotNet
+} else {
+    $DotNetCommand = Get-Command dotnet -ErrorAction SilentlyContinue
+    if (-not $DotNetCommand) {
+        throw "No .NET SDK is available. Install .NET 8 or place a local SDK in .dotnet."
+    }
+    $DotNetExe = $DotNetCommand.Source
+}
+
+$dotnetSdks = & $DotNetExe --list-sdks 2>$null
 if ($LASTEXITCODE -ne 0 -or -not $dotnetSdks) {
-    throw "No .NET SDK is available. Install the .NET SDK or build the MSI in GitHub Actions."
+    throw "No .NET SDK is available. Install .NET 8, place a local SDK in .dotnet, or build the MSI in GitHub Actions."
 }
 
 $ToolDir = Join-Path $MsiRoot "tools"
-dotnet tool install wix --version $WixVersion --tool-path $ToolDir
+& $DotNetExe tool install wix --version $WixVersion --tool-path $ToolDir
 Assert-NativeCommand "Installing WiX $WixVersion"
 $WixExe = Join-Path $ToolDir "wix.exe"
 

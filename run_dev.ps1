@@ -8,4 +8,5 @@ if (-not (Test-Path $VenvPython)) {
 }
 
 $env:MPLCONFIGDIR = Join-Path $Root "runtime\matplotlib"
+$env:PYTHONNOUSERSITE = "1"
 & $VenvPython (Join-Path $Root "src\sciplot_app.py")

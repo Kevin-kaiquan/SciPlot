@@ -73,14 +73,14 @@ def main() -> None:
     transparent_logo = remove_white_background(image)
     app_icon = make_app_icon(transparent_logo)
 
+    for generated in (PNG, ICO, ICNS):
+        generated.unlink(missing_ok=True)
     transparent_logo.save(PNG)
     app_icon.save(ICO, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
     try:
         app_icon.save(ICNS, sizes=[(16, 16), (32, 32), (64, 64), (128, 128), (256, 256), (512, 512), (1024, 1024)])
-    except Exception:
-        # Pillow's ICNS writer depends on platform/library support. The macOS
-        # release workflow can still generate an .icns file with iconutil.
-        pass
+    except Exception as exc:
+        raise RuntimeError("Unable to generate the macOS application icon.") from exc
 
     print(PNG)
     print(ICO)

@@ -7,11 +7,11 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-windows:
-    name: Build Windows portable app
+    name: Build Windows x64
     runs-on: windows-latest
 
     steps:
@@ -28,6 +28,10 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Validate tag version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: python scripts/check_release_version.py "${{ github.ref_name }}"
+
       - name: Build SciPlot
         shell: pwsh
         run: .\build_exe.ps1
@@ -36,36 +40,44 @@ jobs:
         shell: pwsh
         run: |
           $env:SCIPLOT_APP_DATA_DIR = Join-Path $env:RUNNER_TEMP "sciplot-smoke"
+          $env:QT_QPA_PLATFORM = "offscreen"
           New-Item -ItemType Directory -Path $env:SCIPLOT_APP_DATA_DIR -Force | Out-Null
-          .\dist\SciPlot\SciPlot.exe --smoke-test
-          .\dist\SciPlot\SciPlot.exe --gui-smoke
+          foreach ($argument in @("--smoke-test", "--gui-smoke")) {
+            $process = Start-Process -FilePath ".\dist\SciPlot\SciPlot.exe" -ArgumentList $argument -Wait -PassThru
+            if ($process.ExitCode -ne 0) {
+              $log = Join-Path $env:SCIPLOT_APP_DATA_DIR "runtime\startup_error.log"
+              if (Test-Path $log) {
+                Get-Content $log
+              }
+              throw "Packaged SciPlot $argument failed with exit code $($process.ExitCode)."
+            }
+          }
 
       - name: Remove smoke-test state
         shell: pwsh
         run: |
-          foreach ($name in @("exports", "runtime", "user_data")) {
+          foreach ($name in @("exports", "runtime", "projects", "templates", "updates")) {
             $path = Join-Path "dist\SciPlot" $name
             if (Test-Path $path) {
               Remove-Item -LiteralPath $path -Recurse -Force
             }
           }
-          foreach ($name in @("last_session.json", "last_session.tmp")) {
+          foreach ($name in @("last_session.json", "settings.ini")) {
             $path = Join-Path "dist\SciPlot" $name
             if (Test-Path $path) {
               Remove-Item -LiteralPath $path -Force
             }
           }
 
-      - name: Package Windows build
+      - name: Package Windows portable build
         shell: pwsh
-        run: |
-          Compress-Archive -Path dist\SciPlot\* -DestinationPath SciPlot-Windows-x64.zip -Force
+        run: Compress-Archive -Path dist\SciPlot\* -DestinationPath SciPlot-Windows-x64.zip -Force
 
       - name: Build Windows MSI
         shell: pwsh
         run: .\scripts\build_msi.ps1
 
-      - name: Upload Windows artifact
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: SciPlot-Windows-x64
@@ -73,16 +85,8 @@ jobs:
             SciPlot-Windows-x64.zip
             dist/SciPlot-Windows-x64.msi
 
-      - name: Attach Windows build to release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            SciPlot-Windows-x64.zip
-            dist/SciPlot-Windows-x64.msi
-
   build-macos:
-    name: Build macOS app (${{ matrix.arch }})
+    name: Build macOS (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -111,6 +115,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Validate tag version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: python scripts/check_release_version.py "${{ github.ref_name }}"
+
       - name: Prepare app icons
         run: python scripts/prepare_icons.py
 
@@ -122,12 +130,16 @@ jobs:
             --windowed \
             --name "SciPlot" \
             --icon "logo/SciPlot.icns" \
+            --osx-bundle-identifier "io.github.kevin-kaiquan.sciplot" \
+            --hidden-import "matplotlib.backends.backend_qtagg" \
             --hidden-import "matplotlib.backends.backend_agg" \
             --hidden-import "matplotlib.backends.backend_pdf" \
-            --hidden-import "matplotlib.backends.backend_ps" \
             --hidden-import "matplotlib.backends.backend_svg" \
+            --hidden-import "scipy.stats" \
+            --hidden-import "PySide6.QtSvg" \
             --hidden-import "openpyxl" \
             --hidden-import "xlrd" \
+            --exclude-module "tkinter" \
             --distpath dist \
             --workpath build \
             --specpath . \
@@ -140,6 +152,14 @@ jobs:
           cp -R sample_data dist/sample_data
           cp -R templates dist/templates
           cp -R logo dist/logo
+
+      - name: Validate packaged app
+        run: |
+          export SCIPLOT_APP_DATA_DIR="${RUNNER_TEMP}/sciplot-smoke-${{ matrix.arch }}"
+          export QT_QPA_PLATFORM=offscreen
+          mkdir -p "$SCIPLOT_APP_DATA_DIR"
+          dist/SciPlot.app/Contents/MacOS/SciPlot --smoke-test
+          dist/SciPlot.app/Contents/MacOS/SciPlot --gui-smoke
 
       - name: Package macOS DMG
         run: |
@@ -159,8 +179,29 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.dmg }}
 
-      - name: Attach macOS build to release
-        if: startsWith(github.ref, 'refs/tags/')
+  publish-release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate SHA-256 checksums
+        run: |
+          cd release-assets
+          sha256sum *.msi *.zip *.dmg > SHA256SUMS.txt
+
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.dmg }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release-assets/*

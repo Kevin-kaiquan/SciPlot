@@ -1,0 +1,2 @@
+APP_NAME = "SciPlot"
+APP_VERSION = "3.0.0"

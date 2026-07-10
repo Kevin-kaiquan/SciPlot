@@ -1,52 +1,67 @@
-# SciPlot 使用指南
+# SciPlot User Guide
 
-## 快速開始
+## Workspace
 
-1. 打開 `dist\SciPlot\SciPlot.exe`。
-2. 點擊「載入數據」，選擇 CSV、TSV、TXT 或 Excel 文件。
-3. 在「繪圖」頁選擇圖表類型、X 軸欄位和 Y 軸欄位。
-4. 點擊「生成 / 更新圖表」。
-5. 使用頂部按鈕導出 PNG、SVG 或 PDF。
+SciPlot opens directly into the figure workspace. The left dock contains data and chart-column controls. The right dock contains style, layout, and template controls. Both docks can be resized, moved, floated, closed, and restored from the View menu.
 
-## 數據格式
+## Import Data
 
-第一行需要是欄位名稱。數值欄位會自動識別。
+Use **File > Import Data**, the toolbar button, or drag a CSV, TSV, TXT, DAT, XLSX, or XLS file into the window. SciPlot displays the imported table in the Data Preview tab and suggests X, Y, error, Z, and group columns from common column names.
 
-常見格式：
+## Generate a Figure
 
-```csv
-time_s,signal_a,signal_b,error_a,group
-0,0.03,0.12,0.02,control
-1,0.18,0.21,0.03,control
-```
+1. Select a chart type.
+2. Select the visible chart-specific columns.
+3. Set titles and axis labels.
+4. Adjust the Style and Layout panels.
+5. Select **Generate Figure** or press `Ctrl+Enter`.
 
-## 圖表建議
+For line and step charts, SciPlot warns when repeated X values are present without a group column because unrelated series could otherwise be connected.
 
-- 折線圖：時間序列、實驗過程曲線。
-- 階梯圖：離散時間點、事件序列、分段變化。
-- 面積圖 / 堆疊面積圖：總量變化和構成變化。
-- 散點圖：兩個連續變量之間的關係。
-- 氣泡圖：在散點圖上加入第三個數值作為點大小。
-- 柱狀圖：不同樣本、處理組或類別的對比。
-- 誤差棒：均值和標準差、標準誤等。
-- 直方圖：分布檢查。
-- 密度曲線 / ECDF：更平滑或累積形式的分布展示。
-- 箱線圖：多組數據分布比較。
-- 小提琴圖：多組分布形狀比較。
-- 二維直方圖 / 六邊形密度圖：大量散點的密度展示。
-- 等高線圖：X、Y、Z 三個連續變量之間的曲面投影。
-- 相關熱圖：多個數值欄位之間的相關性。
-- 雷達圖：多個指標均值的輪廓比較。
-- 極坐標圖：角度和半徑型數據。
-- 餅圖 / 環形圖：少量類別構成比例。
-- 3D 散點、3D 折線、3D 曲面、3D 網格、3D 柱狀、3D 等高線：需要 X、Y、Z 欄位。
+## Move Labels
 
-## 模板
+Select **Move Labels** or press `Ctrl+L`. Drag any of these items directly in the preview:
 
-模板是本地 JSON 文件，保存在 `templates` 目錄。可以保存自己的樣式，也可以把 JSON 文件發給同學導入。
+- Figure title
+- X-axis label
+- Y-axis label
+- Legend
 
-本項目沒有模板市場、購買、支付或賬號功能。
+Moved positions are saved in projects, templates, and the last-session state. Use **Reset Label Positions** to return to automatic placement. Label moves support undo and redo.
 
-## 便攜分發
+## Missing Values
 
-發給同學時，複製整個 `dist\SciPlot` 文件夾。`SciPlot.exe` 需要同目錄下的 `_internal` 文件夾才能運行。
+The Style panel provides three explicit policies:
+
+- **Drop incomplete rows**: default and scientifically conservative.
+- **Interpolate**: fills numeric gaps before plotting.
+- **Treat as zero**: use only when a missing value genuinely means zero.
+
+Area charts no longer convert missing values to zero unless this policy is selected.
+
+## Projects
+
+SciPlot 3 projects use the `.sciplot` extension. A project is a compressed, versioned container containing data and figure settings. Shared projects store only the original source file name, not the sender's local absolute path. Legacy SciPlot JSON projects remain readable.
+
+## Export
+
+Use **Export Figure** or `Ctrl+E` and select PNG, SVG, or PDF.
+
+- PNG is suitable for slides, documents, and raster publication workflows.
+- SVG is suitable for vector editing and browser-compatible workflows.
+- PDF is suitable for vector publication and print workflows.
+
+SciPlot rejects PNG dimensions that could exhaust system memory. DPI mainly affects PNG and rasterized content inside vector formats.
+
+## Updates
+
+Automatic release checks run at most once every 24 hours and can be disabled in the Tools menu. SciPlot remains fully usable offline. Update packages are downloaded from the official GitHub repository.
+
+## Troubleshooting
+
+- Current release packages are unsigned. Download only from the official GitHub Releases page and verify `SHA256SUMS.txt`. For a verified Windows package blocked by SmartScreen, use **More info > Run anyway**. For a verified macOS package blocked by Gatekeeper, Control-click SciPlot and choose **Open**, or use **System Settings > Privacy & Security**.
+- If a chart fails, verify that the selected columns contain valid numeric data for that chart type.
+- If a contour or surface chart fails, provide at least three non-collinear X/Y points.
+- If a pie chart fails, values must be non-negative and have a positive total.
+- If an old session is not restored, its original large source file may have moved or changed.
+- Startup errors are written to the application's writable runtime data directory rather than the installation folder.
