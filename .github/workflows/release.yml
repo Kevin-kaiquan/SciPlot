@@ -194,14 +194,37 @@ jobs:
           path: release-assets
           merge-multiple: true
 
-      - name: Generate SHA-256 checksums
+      - name: Collect release assets and generate checksums
         run: |
-          cd release-assets
-          sha256sum *.msi *.zip *.dmg > SHA256SUMS.txt
+          python - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+          from shutil import copy2
+
+          expected = {
+              "SciPlot-Windows-x64.msi",
+              "SciPlot-Windows-x64.zip",
+              "SciPlot-macOS-arm64.dmg",
+              "SciPlot-macOS-intel.dmg",
+          }
+          sources = [path for path in Path("release-assets").rglob("*") if path.is_file()]
+          by_name = {path.name: path for path in sources}
+          if len(by_name) != len(sources) or set(by_name) != expected:
+              raise SystemExit(f"Unexpected release assets: {sorted(path.name for path in sources)}")
+
+          destination = Path("release-files")
+          destination.mkdir()
+          checksum_lines = []
+          for name in sorted(expected):
+              output = destination / name
+              copy2(by_name[name], output)
+              checksum_lines.append(f"{sha256(output.read_bytes()).hexdigest()}  {name}\n")
+          (destination / "SHA256SUMS.txt").write_text("".join(checksum_lines), encoding="ascii")
+          PY
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
           generate_release_notes: true
-          files: release-assets/*
+          files: release-files/*
