@@ -11,9 +11,10 @@ SciPlot is offline-first. It has no accounts, payments, advertising, analytics, 
 - Dockable, movable, closable, and resizable data, plot, style, layout, and template panels.
 - English, Traditional Chinese, and Simplified Chinese user interfaces.
 - Background data import, project save/load, figure export, update checks, and installer downloads.
-- Undo and redo for generated figure settings and manually moved labels.
+- Undo and redo for generated figure settings and manually moved labels or colorbars.
 - Drag-and-drop data and project files.
-- Direct dragging of the title, X label, Y label, and legend in the figure preview.
+- Direct dragging of the title, X label, Y label, legend, and colorbar in the figure preview.
+- Collision-aware colorbar layouts with right, left, top, bottom, hidden, spacing, and manual-position controls.
 - Versioned `.sciplot` project files with compressed embedded data and backward-compatible legacy JSON import.
 - Automatic restoration of the last generated figure without silently accepting a changed source file.
 - PNG, SVG, and PDF export with a guard against unsafe bitmap sizes.
@@ -64,7 +65,7 @@ Current community builds are not code-signed or notarized. Download them only fr
 3. Choose a chart type and the required data columns in the left Plot panel.
 4. Adjust visual settings in the right Style and Layout panels.
 5. Select **Generate Figure**.
-6. Select **Move Labels** and drag the title, axis labels, or legend if their automatic positions are not suitable.
+6. Select **Move Labels and Colorbar** and drag the title, axis labels, legend, or colorbar if their automatic positions are not suitable.
 7. Export PNG, SVG, or PDF, or save a `.sciplot` project.
 
 SciPlot starts with an empty figure workspace on first launch. After a figure has been generated, the next launch restores that figure and its data. If a large source file changed after the previous session, SciPlot refuses to silently recreate the old figure with different data.
@@ -79,7 +80,7 @@ SciPlot starts with an empty figure workspace on first launch. After a figure ha
 | Save project | `Ctrl+S` |
 | Generate figure | `Ctrl+Enter` |
 | Export figure | `Ctrl+E` |
-| Move labels | `Ctrl+L` |
+| Move labels and colorbar | `Ctrl+L` |
 | Undo / redo | `Ctrl+Z` / `Ctrl+Y` |
 
 On macOS, Qt maps standard shortcuts to the corresponding Command-key conventions where applicable.

@@ -156,6 +156,7 @@ class MainWindow(QMainWindow):
         self.form_labels: dict[str, list[QLabel]] = {}
         self.plot_rows: dict[str, tuple[QLabel, QWidget]] = {}
         self.style_rows: dict[str, tuple[QLabel, QWidget]] = {}
+        self.colorbar_rows: dict[str, tuple[QLabel, QWidget]] = {}
 
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.setMinimumSize(900, 600)
@@ -527,6 +528,10 @@ class MainWindow(QMainWindow):
         self._add_row(form, "tick_rotation", self.rotation_spin)
         self.legend_position_combo = self._combo([("Auto", "auto"), ("Upper right", "upper_right"), ("Upper left", "upper_left"), ("Right", "right"), ("Bottom", "bottom"), ("None", "none")])
         self._add_row(form, "legend_position", self.legend_position_combo)
+        self.colorbar_position_combo = self._combo([("Auto", "auto"), ("Right", "right"), ("Left", "left"), ("Bottom", "bottom"), ("Top", "top"), ("Hidden", "none")])
+        self._add_row(form, "colorbar_position", self.colorbar_position_combo, self.colorbar_rows)
+        self.colorbar_pad_spin = self._double_spin(0.02, 0.30, 0.12, 0.01, 2)
+        self._add_row(form, "colorbar_spacing", self.colorbar_pad_spin, self.colorbar_rows)
         self.left_margin_spin = self._double_spin(0, 0.45, 0, 0.01, 2)
         self._add_row(form, "left_margin", self.left_margin_spin)
         self.right_margin_spin = self._double_spin(0, 0.45, 0, 0.01, 2)
@@ -664,6 +669,17 @@ class MainWindow(QMainWindow):
                 (tr("legend_right", self.language), "right"),
                 (tr("legend_bottom", self.language), "bottom"),
                 (tr("legend_none", self.language), "none"),
+            ],
+        )
+        self._replace_combo_items(
+            self.colorbar_position_combo,
+            [
+                (tr("colorbar_auto", self.language), "auto"),
+                (tr("colorbar_right", self.language), "right"),
+                (tr("colorbar_left", self.language), "left"),
+                (tr("colorbar_bottom", self.language), "bottom"),
+                (tr("colorbar_top", self.language), "top"),
+                (tr("colorbar_none", self.language), "none"),
             ],
         )
         self.status_label.setText(tr("ready", self.language))
@@ -806,6 +822,8 @@ class MainWindow(QMainWindow):
             ylabel_y=None,
             legend_x=None,
             legend_y=None,
+            colorbar_x=None,
+            colorbar_y=None,
         )
         self.current_settings = target
         self.apply_settings_to_controls(target)
@@ -852,13 +870,24 @@ class MainWindow(QMainWindow):
                 visible = requirements["3d"]
             label.setVisible(visible)
             widget.setVisible(visible)
+        for label, widget in self.colorbar_rows.values():
+            label.setVisible(requirements["colorbar"])
+            widget.setVisible(requirements["colorbar"])
         self.polar_degrees_check.setVisible(requirements["polar"])
         self.radar_normalize_check.setVisible(requirements["radar"])
         self.y_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection if requirements["single_y"] else QAbstractItemView.SelectionMode.ExtendedSelection)
 
     def collect_settings(self) -> PlotSettings:
+        chart_type = str(self.chart_combo.currentData() or "line")
+        colorbar_position = str(self.colorbar_position_combo.currentData() or "auto")
+        colorbar_pad = self.colorbar_pad_spin.value()
+        keep_colorbar_position = (
+            chart_type == self.current_settings.chart_type
+            and colorbar_position == self.current_settings.colorbar_position
+            and abs(colorbar_pad - self.current_settings.colorbar_pad) < 0.0001
+        )
         return PlotSettings(
-            chart_type=str(self.chart_combo.currentData() or "line"),
+            chart_type=chart_type,
             x_col=str(self.x_combo.currentData() or ""),
             y_cols=self._selected_y_columns(),
             z_col=str(self.z_combo.currentData() or ""),
@@ -886,6 +915,8 @@ class MainWindow(QMainWindow):
             tick_label_pad=self.tick_pad_spin.value(),
             x_tick_rotation=self.rotation_spin.value(),
             legend_position=str(self.legend_position_combo.currentData() or "auto"),
+            colorbar_position=colorbar_position,
+            colorbar_pad=colorbar_pad,
             margin_left=self.left_margin_spin.value(),
             margin_right=self.right_margin_spin.value(),
             margin_top=self.top_margin_spin.value(),
@@ -907,6 +938,8 @@ class MainWindow(QMainWindow):
             ylabel_y=self.current_settings.ylabel_y,
             legend_x=self.current_settings.legend_x,
             legend_y=self.current_settings.legend_y,
+            colorbar_x=self.current_settings.colorbar_x if keep_colorbar_position else None,
+            colorbar_y=self.current_settings.colorbar_y if keep_colorbar_position else None,
         )
 
     def apply_settings_to_controls(self, settings: PlotSettings) -> None:
@@ -949,6 +982,8 @@ class MainWindow(QMainWindow):
             self.tick_pad_spin.setValue(settings.tick_label_pad)
             self.rotation_spin.setValue(settings.x_tick_rotation)
             self._set_combo_data(self.legend_position_combo, settings.legend_position)
+            self._set_combo_data(self.colorbar_position_combo, settings.colorbar_position)
+            self.colorbar_pad_spin.setValue(settings.colorbar_pad)
             self.left_margin_spin.setValue(settings.margin_left)
             self.right_margin_spin.setValue(settings.margin_right)
             self.top_margin_spin.setValue(settings.margin_top)
@@ -1039,7 +1074,19 @@ class MainWindow(QMainWindow):
         if self.last_rendered_settings is None:
             return
         before = self.current_settings
-        after = replace(before, title_x=None, title_y=None, xlabel_x=None, xlabel_y=None, ylabel_x=None, ylabel_y=None, legend_x=None, legend_y=None)
+        after = replace(
+            before,
+            title_x=None,
+            title_y=None,
+            xlabel_x=None,
+            xlabel_y=None,
+            ylabel_x=None,
+            ylabel_y=None,
+            legend_x=None,
+            legend_y=None,
+            colorbar_x=None,
+            colorbar_y=None,
+        )
         self.undo_stack.push(SettingsCommand(self, before, after, tr("reset_labels", self.language)))
 
     def _suggested_export_name(self) -> str:

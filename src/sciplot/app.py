@@ -106,6 +106,18 @@ def run_smoke_test() -> None:
     if not density_output.exists() or density_output.stat().st_size < 1000:
         raise RuntimeError("Packaged SciPy density smoke test failed")
     print(density_output)
+    colorbar_output = EXPORT_DIR / "colorbar_smoke.svg"
+    colorbar_settings = PlotSettings(
+        chart_type="scatter3d",
+        x_col="time_s",
+        y_cols=["signal_a"],
+        z_col="temperature_c",
+        title="SciPlot 3D colorbar smoke test",
+    )
+    save_figure(dataframe, colorbar_settings, str(colorbar_output), 150)
+    if not colorbar_output.exists() or colorbar_output.stat().st_size < 1000:
+        raise RuntimeError("Packaged 3D colorbar smoke test failed")
+    print(colorbar_output)
     date_frame = pd.DataFrame({"when": [pd.Timestamp("2026-01-01")], "value": [1.5]})
     restored = dataframe_from_json(dataframe_to_json(date_frame))
     if not pd.api.types.is_datetime64_any_dtype(restored["when"]):
@@ -126,6 +138,17 @@ def run_gui_smoke_test() -> None:
     save_figure(dataframe, settings, str(output), 150)
     if not output.exists() or output.stat().st_size < 1000:
         raise RuntimeError("Qt GUI export smoke test failed")
+    colorbar_settings = PlotSettings(
+        chart_type="scatter3d",
+        x_col="time_s",
+        y_cols=["signal_a"],
+        z_col="temperature_c",
+        title="GUI colorbar smoke",
+    )
+    window.apply_settings(colorbar_settings, render=True)
+    application.processEvents()
+    if window.figure is None or "colorbar" not in getattr(window.figure, "_sciplot_artists", {}):
+        raise RuntimeError("Qt GUI smoke test did not register the 3D colorbar")
     window._apply_dataframe(dataframe.copy(), "new_measurements.csv")
     application.processEvents()
     if window.figure is not None or window.last_rendered_settings is not None or window.preview_stack.currentIndex() != 0:

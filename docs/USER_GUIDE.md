@@ -20,16 +20,19 @@ Use **File > Import Data**, the toolbar button, or drag a CSV, TSV, TXT, DAT, XL
 
 For line and step charts, SciPlot warns when repeated X values are present without a group column because unrelated series could otherwise be connected.
 
-## Move Labels
+## Move Labels and Colorbar
 
-Select **Move Labels** or press `Ctrl+L`. Drag any of these items directly in the preview:
+For charts with a color scale, use **Colorbar position** and **Colorbar spacing** in the Layout panel to place it on the right, left, top, or bottom, or hide it. Automatic placement uses the top for 3D charts and the right for 2D charts because those positions remain readable across more preview sizes. SciPlot also reserves additional space around 3D axes so the colorbar does not cover coordinate labels.
+
+Select **Move Labels and Colorbar** or press `Ctrl+L`. Drag any of these items directly in the preview:
 
 - Figure title
 - X-axis label
 - Y-axis label
 - Legend
+- Colorbar
 
-Moved positions are saved in projects, templates, and the last-session state. Use **Reset Label Positions** to return to automatic placement. Label moves support undo and redo.
+Moved positions are saved in projects, templates, and the last-session state and are reproduced in PNG, SVG, and PDF exports. Use **Reset Moved Positions** to return to automatic placement. Moves support undo and redo.
 
 ## Missing Values
 

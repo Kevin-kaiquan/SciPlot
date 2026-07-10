@@ -17,6 +17,7 @@ from .models import CHART_DEFINITIONS, PALETTES, PlotSettings
 
 THREE_D_CHARTS = {"scatter3d", "line3d", "surface3d", "wireframe3d", "bar3d", "contour3d"}
 POLAR_CHARTS = {"radar", "polar_line", "polar_scatter"}
+COLORBAR_CHARTS = {"bubble", "heatmap", "hist2d", "hexbin", "contour", "contourf", "scatter3d", "surface3d", "contour3d"}
 NO_X_REQUIRED = {"histogram", "density", "ecdf", "boxplot", "violin", "heatmap", "radar", "pie", "donut"}
 Y_OPTIONAL = {"heatmap"}
 Z_REQUIRED = THREE_D_CHARTS | {"contour", "contourf"}
@@ -38,6 +39,7 @@ def chart_requirements(chart_type: str) -> dict[str, bool]:
         "3d": chart_type in THREE_D_CHARTS,
         "polar": chart_type in {"polar_line", "polar_scatter"},
         "radar": chart_type == "radar",
+        "colorbar": chart_type in COLORBAR_CHARTS,
     }
 
 
@@ -76,6 +78,7 @@ class PlotEngine:
         self.dataframe = dataframe
         self._numeric_cache: dict[str, pd.Series] = {}
         self._colorbar_artist: Any = None
+        self._colorbar_spec: tuple[Any, str] | None = None
 
     def create_figure(self, settings: PlotSettings, dpi: int | None = None) -> Figure:
         validate_settings(self.dataframe, settings)
@@ -101,6 +104,7 @@ class PlotEngine:
             figure.patch.set_facecolor("#ffffff")
             axes.set_facecolor("#ffffff")
             self._colorbar_artist = None
+            self._colorbar_spec = None
             self._plot(axes, chart_type, settings)
             artists = self._decorate(axes, figure, settings)
             figure._sciplot_axes = axes  # type: ignore[attr-defined]
@@ -158,6 +162,9 @@ class PlotEngine:
 
     def _colors(self, settings: PlotSettings) -> list[str]:
         return PALETTES.get(settings.palette, PALETTES["SciPlot Classic"])
+
+    def _register_colorbar(self, artist: Any, label: str) -> None:
+        self._colorbar_spec = (artist, label)
 
     def _plot(self, axes: Any, chart_type: str, settings: PlotSettings) -> None:
         handlers = {
@@ -263,7 +270,7 @@ class PlotEngine:
             kwargs = {"c": frame[settings.color_col], "cmap": "viridis"}
         artist = axes.scatter(frame[settings.x_col], frame[y_column], s=sizes, alpha=0.72, edgecolors="#ffffff", linewidths=0.6, label=y_column, **kwargs)
         if settings.color_col:
-            axes.figure.colorbar(artist, ax=axes, fraction=0.046, pad=0.04, label=settings.color_col)
+            self._register_colorbar(artist, settings.color_col)
 
     def _plot_bar(self, axes: Any, settings: PlotSettings, horizontal: bool) -> None:
         colors = self._colors(settings)
@@ -435,19 +442,19 @@ class PlotEngine:
                 value = correlation.values[row, column]
                 color = "white" if np.isfinite(value) and abs(value) > 0.55 else "#111827"
                 axes.text(column, row, "-" if not np.isfinite(value) else f"{value:.2f}", ha="center", va="center", color=color, fontsize=max(7, settings.font_size - 2))
-        axes.figure.colorbar(image, ax=axes, fraction=0.046, pad=0.04, label="Pearson r")
+        self._register_colorbar(image, "Pearson r")
 
     def _plot_hist2d(self, axes: Any, settings: PlotSettings) -> None:
         y_column = (settings.y_cols or [""])[0]
         frame = self._numeric_frame([settings.x_col, y_column], settings)
         image = axes.hist2d(frame[settings.x_col], frame[y_column], bins=settings.bins, cmap="viridis")
-        axes.figure.colorbar(image[3], ax=axes, fraction=0.046, pad=0.04, label="Count")
+        self._register_colorbar(image[3], "Count")
 
     def _plot_hexbin(self, axes: Any, settings: PlotSettings) -> None:
         y_column = (settings.y_cols or [""])[0]
         frame = self._numeric_frame([settings.x_col, y_column], settings)
         artist = axes.hexbin(frame[settings.x_col], frame[y_column], gridsize=settings.bins, cmap="viridis", mincnt=1)
-        axes.figure.colorbar(artist, ax=axes, fraction=0.046, pad=0.04, label="Count")
+        self._register_colorbar(artist, "Count")
 
     def _plot_contour(self, axes: Any, settings: PlotSettings, filled: bool) -> None:
         y_column = (settings.y_cols or [""])[0]
@@ -457,7 +464,7 @@ class PlotEngine:
         else:
             artist = axes.tricontour(triangulation, frame[settings.z_col], levels=min(settings.bins, 40), cmap="viridis", linewidths=1.0)
             axes.clabel(artist, inline=True, fontsize=max(7, settings.font_size - 2))
-        axes.figure.colorbar(artist, ax=axes, fraction=0.046, pad=0.04, label=settings.z_col)
+        self._register_colorbar(artist, settings.zlabel or settings.z_col)
 
     def _plot_radar(self, axes: Any, settings: PlotSettings) -> None:
         columns = settings.y_cols or []
@@ -534,7 +541,7 @@ class PlotEngine:
             if settings.color_col:
                 color_values = pd.to_numeric(self.dataframe.loc[frame.index, settings.color_col], errors="coerce").fillna(z)
             artist = axes.scatter(x, y, z, c=color_values, cmap="viridis", s=max(25, settings.marker_size**2), depthshade=True)
-            axes.figure.colorbar(artist, ax=axes, fraction=0.046, pad=0.04, label=settings.color_col or settings.z_col)
+            self._register_colorbar(artist, settings.color_col or settings.zlabel or settings.z_col)
         elif settings.chart_type == "line3d":
             axes.plot(x, y, z, color=colors[0], linewidth=settings.line_width, marker=settings.marker or None, label=y_column)
         elif settings.chart_type in {"surface3d", "wireframe3d", "contour3d"}:
@@ -542,12 +549,13 @@ class PlotEngine:
             surface_z = surface_frame[settings.z_col]
             if settings.chart_type == "surface3d":
                 artist = axes.plot_trisurf(triangulation, surface_z, cmap="viridis", alpha=0.88, linewidth=0.25)
-                axes.figure.colorbar(artist, ax=axes, fraction=0.046, pad=0.04, label=settings.z_col)
+                self._register_colorbar(artist, settings.zlabel or settings.z_col)
             elif settings.chart_type == "wireframe3d":
                 artist = axes.plot_trisurf(triangulation, surface_z, color=colors[0], alpha=0.0, edgecolor=colors[0], linewidth=0.7)
                 artist.set_facecolor((0, 0, 0, 0))
             else:
-                axes.tricontour(triangulation, surface_z, levels=min(settings.bins, 35), cmap="viridis")
+                artist = axes.tricontour(triangulation, surface_z, levels=min(settings.bins, 35), cmap="viridis")
+                self._register_colorbar(artist, settings.zlabel or settings.z_col)
         else:
             def spacing(values: pd.Series) -> float:
                 unique = np.sort(values.unique())
@@ -556,6 +564,50 @@ class PlotEngine:
             dx = np.full(len(frame), spacing(x))
             dy = np.full(len(frame), spacing(y))
             axes.bar3d(x - dx / 2, y - dy / 2, np.zeros(len(frame)), dx, dy, z, color=colors[0], alpha=0.72, shade=True)
+
+    def _create_colorbar(self, axes: Any, figure: Figure, settings: PlotSettings) -> Any:
+        if self._colorbar_spec is None or settings.colorbar_position == "none":
+            return None
+        is_3d = settings.chart_type in THREE_D_CHARTS
+        if settings.colorbar_position == "auto":
+            position = "top" if is_3d else "right"
+        else:
+            position = settings.colorbar_position if settings.colorbar_position in {"right", "left", "top", "bottom"} else "right"
+        vertical = position in {"right", "left"}
+        if is_3d and not vertical:
+            smallest_dimension = max(2.0, min(figure.get_figwidth(), figure.get_figheight()))
+            minimum_pad = max(0.16, 1.2 / smallest_dimension - 0.2)
+        else:
+            minimum_pad = 0.12 if is_3d or position == "top" else 0.10 if position == "bottom" else 0.04
+        pad = float(np.clip(settings.colorbar_pad, minimum_pad, 0.65))
+        artist, label = self._colorbar_spec
+        colorbar = figure.colorbar(
+            artist,
+            ax=axes,
+            location=position,
+            fraction=0.04 if vertical else 0.075,
+            pad=pad,
+            shrink=0.72 if is_3d else 0.90,
+            aspect=24 if vertical else 30,
+        )
+        colorbar.set_label(label, labelpad=max(6, settings.axis_label_pad))
+        colorbar.ax.set_picker(True)
+        colorbar._sciplot_location = position  # type: ignore[attr-defined]
+        self._colorbar_artist = colorbar
+        return colorbar
+
+    @staticmethod
+    def _apply_manual_colorbar_position(colorbar: Any, settings: PlotSettings) -> None:
+        if colorbar is None or settings.colorbar_x is None or settings.colorbar_y is None:
+            return
+        colorbar_axes = colorbar.ax
+        bounds = colorbar_axes.get_position()
+        x0 = float(np.clip(settings.colorbar_x - bounds.width / 2, 0.01, 0.99 - bounds.width))
+        y0 = float(np.clip(settings.colorbar_y - bounds.height / 2, 0.01, 0.99 - bounds.height))
+        colorbar_axes.set_axes_locator(None)
+        colorbar_axes.set_in_layout(False)
+        colorbar_axes.set_anchor("C")
+        colorbar_axes.set_position([x0, y0, bounds.width, bounds.height])
 
     def _decorate(self, axes: Any, figure: Figure, settings: PlotSettings) -> dict[str, Any]:
         title = axes.set_title(settings.title, fontsize=settings.font_size + 2, pad=settings.title_pad, wrap=True)
@@ -622,12 +674,26 @@ class PlotEngine:
             if settings.y_min is not None or settings.y_max is not None:
                 axes.set_ylim(bottom=settings.y_min, top=settings.y_max)
 
+        colorbar = self._create_colorbar(axes, figure, settings)
         manual_requested = any(value > 0 for value in (settings.margin_left, settings.margin_right, settings.margin_top, settings.margin_bottom))
+        manual_colorbar = colorbar is not None and settings.colorbar_x is not None and settings.colorbar_y is not None
         outside_legend = legend is not None and settings.legend_position in {"right", "bottom"}
         if settings.tight_layout and settings.chart_type in THREE_D_CHARTS:
             figure.set_layout_engine(None)
-            figure.subplots_adjust(left=0.03, right=0.90, top=0.88, bottom=0.07)
-        elif settings.tight_layout and not manual_requested and not outside_legend:
+            colorbar_location = getattr(colorbar, "_sciplot_location", "") if colorbar is not None else ""
+            if colorbar_location == "left":
+                figure.subplots_adjust(left=0.10, right=0.97, top=0.90, bottom=0.07)
+            elif colorbar_location == "bottom":
+                bottom = min(0.20, max(0.12, 0.18 - 0.02 * (figure.get_figheight() - 2.0)))
+                figure.subplots_adjust(left=0.03, right=0.97, top=0.92, bottom=bottom)
+            elif colorbar_location == "top":
+                top = min(0.88, 0.78 + 0.05 * (figure.get_figheight() - 2.0))
+                figure.subplots_adjust(left=0.03, right=0.97, top=top, bottom=0.07)
+            elif colorbar_location == "right":
+                figure.subplots_adjust(left=0.03, right=0.91, top=0.90, bottom=0.07)
+            else:
+                figure.subplots_adjust(left=0.03, right=0.97, top=0.90, bottom=0.07)
+        elif settings.tight_layout and not manual_requested and not outside_legend and not manual_colorbar:
             figure.set_layout_engine("tight", pad=1.5)
         elif settings.tight_layout:
             try:
@@ -649,7 +715,11 @@ class PlotEngine:
             manual["bottom"] = settings.margin_bottom
         if manual:
             figure.subplots_adjust(**manual)
-        return {"title": title, "xlabel": xlabel, "ylabel": ylabel, "legend": legend, "axes": axes}
+        self._apply_manual_colorbar_position(colorbar, settings)
+        artists = {"title": title, "xlabel": xlabel, "ylabel": ylabel, "legend": legend, "axes": axes}
+        if colorbar is not None:
+            artists["colorbar"] = colorbar.ax
+        return artists
 
 
 def save_figure(dataframe: pd.DataFrame, settings: PlotSettings, path: str, dpi: int, transparent: bool = False) -> None:

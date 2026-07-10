@@ -37,7 +37,7 @@ class LabelDragController:
     def _on_press(self, event: Any) -> None:
         if not self.enabled or self.axes is None or event.button != 1:
             return
-        for name in ("legend", "title", "xlabel", "ylabel"):
+        for name in ("colorbar", "legend", "title", "xlabel", "ylabel"):
             if self._contains(self.artists.get(name), event):
                 self.active = name
                 return
@@ -48,10 +48,17 @@ class LabelDragController:
         x, y = self.axes.transAxes.inverted().transform((event.x, event.y))
         return float(x), float(y)
 
+    def _figure_position(self, event: Any) -> tuple[float, float] | None:
+        figure = getattr(self.canvas, "figure", None)
+        if figure is None or event.x is None or event.y is None:
+            return None
+        x, y = figure.transFigure.inverted().transform((event.x, event.y))
+        return float(x), float(y)
+
     def _on_motion(self, event: Any) -> None:
         if not self.active:
             return
-        position = self._axes_position(event)
+        position = self._figure_position(event) if self.active == "colorbar" else self._axes_position(event)
         if position is None:
             return
         x, y = position
@@ -66,13 +73,30 @@ class LabelDragController:
             if legend is not None:
                 legend.set_loc("center")
                 legend.set_bbox_to_anchor((x, y), transform=self.axes.transAxes)
+        elif self.active == "colorbar":
+            colorbar_axes = self.artists.get("colorbar")
+            if colorbar_axes is not None:
+                bounds = colorbar_axes.get_position()
+                x0 = min(max(0.01, x - bounds.width / 2), 0.99 - bounds.width)
+                y0 = min(max(0.01, y - bounds.height / 2), 0.99 - bounds.height)
+                colorbar_axes.set_axes_locator(None)
+                colorbar_axes.set_in_layout(False)
+                colorbar_axes.set_anchor("C")
+                colorbar_axes.set_position([x0, y0, bounds.width, bounds.height])
         self.canvas.draw_idle()
 
     def _on_release(self, event: Any) -> None:
         if not self.active:
             return
-        position = self._axes_position(event)
         active = self.active
         self.active = None
+        if active == "colorbar":
+            colorbar_axes = self.artists.get("colorbar")
+            if colorbar_axes is None:
+                return
+            bounds = colorbar_axes.get_position()
+            position = (bounds.x0 + bounds.width / 2, bounds.y0 + bounds.height / 2)
+        else:
+            position = self._axes_position(event)
         if position is not None:
             self.on_moved(active, position[0], position[1])

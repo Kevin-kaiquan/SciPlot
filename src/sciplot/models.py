@@ -86,6 +86,8 @@ LEGACY_LEGEND_POSITIONS = {
     "无": "none",
 }
 
+COLORBAR_POSITIONS = {"auto", "right", "left", "top", "bottom", "none"}
+
 
 @dataclass
 class PlotSettings:
@@ -118,6 +120,8 @@ class PlotSettings:
     tick_label_pad: int = 4
     x_tick_rotation: int = 0
     legend_position: str = "auto"
+    colorbar_position: str = "auto"
+    colorbar_pad: float = 0.12
     margin_left: float = 0.0
     margin_right: float = 0.0
     margin_top: float = 0.0
@@ -143,6 +147,8 @@ class PlotSettings:
     ylabel_y: float | None = None
     legend_x: float | None = None
     legend_y: float | None = None
+    colorbar_x: float | None = None
+    colorbar_y: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -158,6 +164,8 @@ class PlotSettings:
         payload["legend_position"] = LEGACY_LEGEND_POSITIONS.get(
             str(payload.get("legend_position", "auto")), payload.get("legend_position", "auto")
         )
+        colorbar_position = str(payload.get("colorbar_position", "auto"))
+        payload["colorbar_position"] = colorbar_position if colorbar_position in COLORBAR_POSITIONS else "auto"
         if payload.get("marker") == "None":
             payload["marker"] = ""
         allowed = {field.name for field in fields(cls)}

@@ -5,11 +5,14 @@ import tempfile
 from pathlib import Path
 
 import pandas as pd
+from matplotlib.backend_bases import MouseEvent
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from sciplot.data_io import read_data_file  # noqa: E402
+from sciplot.drag import LabelDragController  # noqa: E402
 from sciplot.i18n import LANGUAGES, TEXT  # noqa: E402
 from sciplot.models import CHART_DEFINITIONS, CHART_GROUPS, PlotSettings  # noqa: E402
 from sciplot.paths import EXPORT_DIR, SAMPLE_DIR  # noqa: E402
@@ -150,9 +153,119 @@ def validate_edge_cases() -> None:
                 raise RuntimeError(f"export dimensions changed unexpectedly: {image.size}")
 
 
+def validate_colorbar_layouts() -> None:
+    frame = read_data_file(SAMPLE_DIR / "example_measurements.csv")
+
+    def assert_safe_layout(settings: PlotSettings, context: str) -> None:
+        figure = PlotEngine(frame).create_figure(settings, dpi=100)
+        canvas = FigureCanvasAgg(figure)
+        canvas.draw()
+        renderer = canvas.get_renderer()
+        artists = getattr(figure, "_sciplot_artists", {})
+        axes = artists["axes"]
+        colorbar_axes = artists.get("colorbar")
+        if colorbar_axes is None:
+            raise RuntimeError(f"{context} did not register its colorbar")
+        colorbar_bounds = colorbar_axes.get_tightbbox(renderer)
+        figure_bounds = figure.bbox
+        if (
+            colorbar_bounds.x0 < -0.5
+            or colorbar_bounds.y0 < -0.5
+            or colorbar_bounds.x1 > figure_bounds.x1 + 0.5
+            or colorbar_bounds.y1 > figure_bounds.y1 + 0.5
+        ):
+            raise RuntimeError(f"{context} colorbar was clipped by the figure boundary")
+        labels = [axes.title, axes.xaxis.label, axes.yaxis.label]
+        if settings.chart_type == "scatter3d":
+            labels.append(axes.zaxis.label)
+        if any(label.get_text() and label.get_window_extent(renderer).overlaps(colorbar_bounds) for label in labels):
+            raise RuntimeError(f"{context} colorbar overlapped an axis label or title")
+
+    for position in ("right", "left", "bottom", "top"):
+        for chart_type in ("scatter3d", "heatmap"):
+            settings = PlotSettings(
+                chart_type=chart_type,
+                x_col="time_s" if chart_type == "scatter3d" else "",
+                y_cols=["signal_a"] if chart_type == "scatter3d" else ["signal_a", "signal_b", "signal_c"],
+                z_col="temperature_c" if chart_type == "scatter3d" else "",
+                title=f"{chart_type} colorbar {position}",
+                colorbar_position=position,
+            )
+            assert_safe_layout(settings, f"{chart_type} {position}")
+
+    for width, height in ((7.2, 4.2), (5.0, 5.0), (3.0, 3.0), (2.0, 3.0)):
+        responsive = PlotSettings(
+            chart_type="scatter3d",
+            x_col="time_s",
+            y_cols=["signal_a"],
+            z_col="temperature_c",
+            title="Responsive automatic colorbar",
+            width=width,
+            height=height,
+        )
+        assert_safe_layout(responsive, f"scatter3d automatic {width}x{height}")
+
+    manual = PlotSettings(
+        chart_type="scatter3d",
+        x_col="time_s",
+        y_cols=["signal_a"],
+        z_col="temperature_c",
+        colorbar_position="right",
+        colorbar_x=0.22,
+        colorbar_y=0.38,
+    )
+    manual_figure = PlotEngine(frame).create_figure(manual, dpi=100)
+    manual_canvas = FigureCanvasAgg(manual_figure)
+    manual_canvas.draw()
+    colorbar_axes = manual_figure._sciplot_artists["colorbar"]
+    bounds = colorbar_axes.get_position()
+    if abs(bounds.x0 + bounds.width / 2 - 0.22) > 0.01 or abs(bounds.y0 + bounds.height / 2 - 0.38) > 0.01:
+        raise RuntimeError("Manual colorbar position was not restored")
+
+    moved: list[tuple[str, float, float]] = []
+    controller = LabelDragController(manual_canvas, lambda name, x, y: moved.append((name, x, y)))
+    controller.set_figure(manual_figure)
+    controller.set_enabled(True)
+    pixel_bounds = colorbar_axes.get_window_extent(manual_canvas.get_renderer())
+    press = MouseEvent(
+        "button_press_event",
+        manual_canvas,
+        pixel_bounds.x0 + pixel_bounds.width / 2,
+        pixel_bounds.y0 + pixel_bounds.height / 2,
+        button=1,
+    )
+    controller._on_press(press)
+    target_x, target_y = manual_figure.transFigure.transform((0.30, 0.45))
+    controller._on_motion(MouseEvent("motion_notify_event", manual_canvas, target_x, target_y, button=1))
+    controller._on_release(MouseEvent("button_release_event", manual_canvas, target_x, target_y, button=1))
+    if not moved or moved[-1][0] != "colorbar" or abs(moved[-1][1] - 0.30) > 0.01 or abs(moved[-1][2] - 0.45) > 0.01:
+        raise RuntimeError("Colorbar dragging did not persist the new figure position")
+
+    hidden = PlotSettings(chart_type="heatmap", y_cols=["signal_a", "signal_b"], colorbar_position="none")
+    hidden_figure = PlotEngine(frame).create_figure(hidden, dpi=100)
+    if "colorbar" in hidden_figure._sciplot_artists or len(hidden_figure.axes) != 1:
+        raise RuntimeError("Hidden colorbar still created an axes object")
+
+    with tempfile.TemporaryDirectory(dir=ROOT / "runtime") as directory:
+        for suffix in ("png", "svg", "pdf"):
+            output = Path(directory) / f"manual-colorbar.{suffix}"
+            save_figure(frame, manual, str(output), 120)
+            if not output.exists() or output.stat().st_size < 1000:
+                raise RuntimeError(f"Manual colorbar {suffix.upper()} export failed")
+
+
 def validate_project_roundtrip() -> None:
     frame = pd.DataFrame({"when": [pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-02")], "value": [1.25, 2.5]})
-    settings = PlotSettings(chart_type="line", x_col="when", y_cols=["value"], title="Datetime roundtrip")
+    settings = PlotSettings(
+        chart_type="line",
+        x_col="when",
+        y_cols=["value"],
+        title="Datetime roundtrip",
+        colorbar_position="bottom",
+        colorbar_pad=0.14,
+        colorbar_x=0.42,
+        colorbar_y=0.18,
+    )
     with tempfile.TemporaryDirectory(dir=ROOT / "runtime") as directory:
         path = Path(directory) / "datetime.sciplot"
         save_project(path, frame, settings, r"C:\Users\Example\private.csv")
@@ -161,6 +274,13 @@ def validate_project_roundtrip() -> None:
             raise RuntimeError("project source path was not sanitized")
         if not pd.api.types.is_datetime64_any_dtype(project.dataframe["when"]):
             raise RuntimeError("datetime project roundtrip failed")
+        if (
+            project.settings.colorbar_position != "bottom"
+            or project.settings.colorbar_pad != 0.14
+            or project.settings.colorbar_x != 0.42
+            or project.settings.colorbar_y != 0.18
+        ):
+            raise RuntimeError("colorbar project settings did not roundtrip")
 
 
 def validate_data_and_session_io() -> None:
@@ -211,7 +331,7 @@ def validate_catalogs() -> None:
 
 
 def validate_updater() -> None:
-    if not is_newer_version("3.0.1", "3.0.0") or is_newer_version("2.9.9", "3.0.0"):
+    if not is_newer_version("3.0.2", "3.0.1") or is_newer_version("2.9.9", "3.0.0"):
         raise RuntimeError("version comparison failed")
     asset = preferred_asset(
         [
@@ -242,6 +362,7 @@ def validate_updater() -> None:
 if __name__ == "__main__":
     render_all_chart_types()
     validate_edge_cases()
+    validate_colorbar_layouts()
     validate_project_roundtrip()
     validate_data_and_session_io()
     validate_catalogs()
