@@ -146,7 +146,7 @@ def run_launcher(startup_smoke: bool = False) -> int:
 
 
 def main() -> int:
-    if "--smoke-test" in sys.argv or "--gui-smoke" in sys.argv:
+    if "--smoke-test" in sys.argv or "--gui-smoke" in sys.argv or "--updater-smoke" in sys.argv:
         from sciplot.app import guarded_main
 
         return guarded_main()

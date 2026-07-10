@@ -87,7 +87,9 @@ On macOS, Qt maps standard shortcuts to the corresponding Command-key convention
 
 ## Updates
 
-SciPlot can check the official GitHub Releases feed after launch, at most once every 24 hours. Automatic checks can be disabled from the Tools menu. A successful check does not display a dialog when the installed version is current. When a release is available, SciPlot can download the correct MSI or DMG package and open it.
+SciPlot can check the official GitHub Releases feed after launch, at most once every 24 hours. Automatic checks can be disabled from the Tools menu. The updater tries direct GitHub HTTPS first, falls back to the system proxy, and retries a failed automatic check without marking it as successful. A successful check does not display a dialog when the installed version is current.
+
+When a release is available, **Download and install** retrieves the correct MSI or DMG, verifies its size and the GitHub SHA-256 digest when available, then closes SciPlot before opening the installer. The Windows MSI remains interactive, including the installation-folder selection.
 
 ## Run from Source
 

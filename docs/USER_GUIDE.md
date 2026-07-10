@@ -60,7 +60,11 @@ SciPlot rejects PNG dimensions that could exhaust system memory. DPI mainly affe
 
 ## Updates
 
-Automatic release checks run at most once every 24 hours and can be disabled in the Tools menu. SciPlot remains fully usable offline. Update packages are downloaded from the official GitHub repository.
+Automatic release checks run at most once every 24 hours and can be disabled in the Tools menu. A check is recorded only after GitHub responds successfully. If an automatic check fails, SciPlot remains fully usable offline and retries later instead of suppressing checks for 24 hours.
+
+The updater tries direct GitHub HTTPS first and the operating system's proxy second. Manual failures provide **Retry** and **Open Releases** actions instead of displaying a low-level network exception.
+
+Select **Download and install** when a release is available. SciPlot downloads the platform-specific MSI or DMG, verifies the package size and GitHub SHA-256 digest when available, then closes before opening the installer. The Windows installer still allows a custom installation folder.
 
 ## Troubleshooting
 

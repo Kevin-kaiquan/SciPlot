@@ -158,12 +158,27 @@ def run_gui_smoke_test() -> None:
     print("gui-ok")
 
 
+def run_updater_smoke_test() -> None:
+    from .updater import fetch_latest_release
+
+    info = fetch_latest_release("0.0.0")
+    if info is None or not info.version or not info.release_url or not info.asset_url:
+        raise RuntimeError("Packaged updater could not resolve the latest GitHub release asset")
+    expected_suffix = ".msi" if sys.platform.startswith("win") else ".dmg" if sys.platform == "darwin" else ""
+    if expected_suffix and not info.asset_name.lower().endswith(expected_suffix):
+        raise RuntimeError(f"Packaged updater selected the wrong asset: {info.asset_name}")
+    print(f"updater-ok {info.version} {info.asset_name}")
+
+
 def main() -> int:
     if "--smoke-test" in sys.argv:
         run_smoke_test()
         return 0
     if "--gui-smoke" in sys.argv:
         run_gui_smoke_test()
+        return 0
+    if "--updater-smoke" in sys.argv:
+        run_updater_smoke_test()
         return 0
     return run_application()
 

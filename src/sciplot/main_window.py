@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import sys
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -54,7 +56,7 @@ from .paths import APP_DATA_ROOT, APP_ICON_PNG, EXPORT_DIR, PROJECT_DIR, SAMPLE_
 from .plotting import PlotEngine, chart_requirements, save_figure
 from .project_io import ProjectData, SessionSourceChangedError, load_project, load_session, save_project, save_session
 from .table_model import PandasTableModel
-from .updater import UpdateInfo, download_update, fetch_latest_release
+from .updater import GITHUB_RELEASES_URL, UpdateInfo, download_update, fetch_latest_release
 from .version import APP_NAME, APP_VERSION
 from .workers import FunctionWorker
 
@@ -146,6 +148,12 @@ class MainWindow(QMainWindow):
         self._applying_settings = False
         self._busy_count = 0
         self._right_auto_hidden = False
+        self._update_check_running = False
+        self._update_retry_scheduled = False
+        self._update_check_silent = False
+        self._update_check_result_received = False
+        self._pending_update_info: UpdateInfo | None = None
+        self._pending_update_error: tuple[str, str] | None = None
         self.settings_store = QSettings(str(APP_DATA_ROOT / "settings.ini"), QSettings.Format.IniFormat)
         self.language = str(self.settings_store.value("language", "en"))
         if self.language not in LANGUAGES:
@@ -1234,34 +1242,107 @@ class MainWindow(QMainWindow):
 
     def _set_auto_updates(self, enabled: bool) -> None:
         self.settings_store.setValue("auto_updates", enabled)
+        if not enabled:
+            self._update_retry_scheduled = False
 
     def _auto_check_updates(self) -> None:
         last = int(self.settings_store.value("last_update_check", 0) or 0)
-        if time.time() - last >= 24 * 60 * 60:
-            self.settings_store.setValue("last_update_check", int(time.time()))
+        checked_version = str(self.settings_store.value("last_update_check_version", ""))
+        if checked_version != APP_VERSION or time.time() - last >= 24 * 60 * 60:
             self.check_for_updates(silent=True)
 
     def check_for_updates(self, silent: bool = False) -> None:
+        if self._update_check_running:
+            if not silent:
+                self.status_label.setText(tr("checking_updates", self.language))
+            return
+        self._update_check_running = True
+        self._update_check_silent = silent
+        self._update_check_result_received = False
+        self._pending_update_info = None
+        self._pending_update_error = None
+        self.actions["check_updates"].setEnabled(False)
         worker = FunctionWorker(fetch_latest_release)
-        worker.signals.error.connect(lambda message, _details: None if silent else QMessageBox.warning(self, APP_NAME, message))
+        worker.signals.result.connect(self._capture_update_result)
+        worker.signals.error.connect(self._capture_update_error)
         self._workers.add(worker)
-        worker.signals.result.connect(lambda info: self._handle_update_info(info, silent))
-        worker.signals.finished.connect(lambda item=worker: self._workers.discard(item))
-        if not silent:
-            self.status_label.setText(tr("check_updates", self.language))
+        worker.signals.finished.connect(lambda item=worker: self._finish_update_check(item))
+        self._set_busy(True, tr("checking_updates", self.language))
         self.thread_pool.start(worker)
+
+    def _capture_update_result(self, info: UpdateInfo | None) -> None:
+        self._update_check_result_received = True
+        self._pending_update_info = info
+
+    def _capture_update_error(self, message: str, details: str) -> None:
+        self._pending_update_error = (message, details)
+
+    def _finish_update_check(self, worker: FunctionWorker) -> None:
+        self._workers.discard(worker)
+        self._set_busy(False)
+        self._update_check_running = False
+        self.actions["check_updates"].setEnabled(True)
+        error = self._pending_update_error
+        silent = self._update_check_silent
+        if error is not None:
+            self._handle_update_check_error(error[0], error[1], silent)
+            return
+        if not self._update_check_result_received:
+            self._handle_update_check_error(tr("update_check_failed", self.language), "", silent)
+            return
+        self._update_retry_scheduled = False
+        self.settings_store.setValue("last_update_check", int(time.time()))
+        self.settings_store.setValue("last_update_check_version", APP_VERSION)
+        self.status_label.setText(tr("ready", self.language))
+        self._handle_update_info(self._pending_update_info, silent)
+
+    def _handle_update_check_error(self, message: str, details: str, silent: bool) -> None:
+        if silent:
+            self.status_label.setText(tr("update_check_postponed", self.language))
+            self._schedule_update_retry()
+            return
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle(APP_NAME)
+        dialog.setText(tr("update_check_failed", self.language))
+        dialog.setInformativeText(tr("update_check_help", self.language))
+        technical_details = f"{message}\n\n{details}".strip()
+        if technical_details:
+            dialog.setDetailedText(technical_details)
+        retry_button = dialog.addButton(tr("retry", self.language), QMessageBox.ButtonRole.AcceptRole)
+        release_button = dialog.addButton(tr("open_release", self.language), QMessageBox.ButtonRole.ActionRole)
+        dialog.addButton(QMessageBox.StandardButton.Close)
+        dialog.exec()
+        if dialog.clickedButton() == retry_button:
+            QTimer.singleShot(0, lambda: self.check_for_updates(silent=False))
+        elif dialog.clickedButton() == release_button:
+            QDesktopServices.openUrl(QUrl(GITHUB_RELEASES_URL))
+        self.status_label.setText(tr("update_check_failed", self.language))
+
+    def _schedule_update_retry(self) -> None:
+        if self._update_retry_scheduled or not self.auto_update_action.isChecked():
+            return
+        self._update_retry_scheduled = True
+        QTimer.singleShot(15 * 60 * 1000, self._retry_update_check)
+
+    def _retry_update_check(self) -> None:
+        if not self._update_retry_scheduled:
+            return
+        self._update_retry_scheduled = False
+        if self.auto_update_action.isChecked():
+            self.check_for_updates(silent=True)
 
     def _handle_update_info(self, info: UpdateInfo | None, silent: bool) -> None:
         if info is None:
             if not silent:
-                QMessageBox.information(self, APP_NAME, f"SciPlot {APP_VERSION} is up to date.")
+                QMessageBox.information(self, APP_NAME, tr("up_to_date", self.language).format(version=APP_VERSION))
             return
         dialog = QMessageBox(self)
         dialog.setIcon(QMessageBox.Icon.Information)
         dialog.setWindowTitle(APP_NAME)
-        dialog.setText(f"SciPlot {info.version} is available.")
-        download_button = dialog.addButton("Download", QMessageBox.ButtonRole.AcceptRole) if info.asset_url else None
-        release_button = dialog.addButton("Open release page", QMessageBox.ButtonRole.ActionRole)
+        dialog.setText(tr("update_available", self.language).format(version=info.version))
+        download_button = dialog.addButton(tr("download_install", self.language), QMessageBox.ButtonRole.AcceptRole) if info.asset_url else None
+        release_button = dialog.addButton(tr("open_release", self.language), QMessageBox.ButtonRole.ActionRole)
         dialog.addButton(QMessageBox.StandardButton.Cancel)
         dialog.exec()
         clicked = dialog.clickedButton()
@@ -1276,11 +1357,15 @@ class MainWindow(QMainWindow):
         self._run_worker(worker, self._open_downloaded_update, f"Downloading SciPlot {info.version}")
 
     def _open_downloaded_update(self, path: Path) -> None:
-        if QMessageBox.question(self, APP_NAME, f"Open installer?\n{path}") != QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(self, APP_NAME, tr("installer_ready", self.language)) != QMessageBox.StandardButton.Yes:
             return
         try:
-            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve()))):
+            resolved = path.resolve()
+            if sys.platform.startswith("win") and resolved.suffix.lower() == ".msi":
+                subprocess.Popen(["msiexec.exe", "/i", str(resolved)], close_fds=True)
+            elif not QDesktopServices.openUrl(QUrl.fromLocalFile(str(resolved))):
                 raise OSError("The operating system did not accept the installer file.")
+            QTimer.singleShot(300, self.close)
         except Exception as exc:
             QMessageBox.critical(self, APP_NAME, str(exc))
 

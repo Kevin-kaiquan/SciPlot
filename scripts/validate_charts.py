@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import io
 import sys
 import tempfile
 from pathlib import Path
@@ -18,7 +20,8 @@ from sciplot.models import CHART_DEFINITIONS, CHART_GROUPS, PlotSettings  # noqa
 from sciplot.paths import EXPORT_DIR, SAMPLE_DIR  # noqa: E402
 from sciplot.plotting import PlotEngine, save_figure  # noqa: E402
 from sciplot.project_io import SessionSourceChangedError, load_project, load_session, save_project, save_session  # noqa: E402
-from sciplot.updater import UpdateInfo, _validate_github_https_url, download_update, is_newer_version, preferred_asset  # noqa: E402
+from sciplot import updater  # noqa: E402
+from sciplot.updater import UpdateCheckError, UpdateInfo, _update_info_from_payload, _validate_github_https_url, download_update, is_newer_version, preferred_asset  # noqa: E402
 
 
 def settings_for(chart_type: str, dataframe: pd.DataFrame) -> PlotSettings:
@@ -331,7 +334,7 @@ def validate_catalogs() -> None:
 
 
 def validate_updater() -> None:
-    if not is_newer_version("3.0.2", "3.0.1") or is_newer_version("2.9.9", "3.0.0"):
+    if not is_newer_version("3.0.3", "3.0.2") or is_newer_version("2.9.9", "3.0.0"):
         raise RuntimeError("version comparison failed")
     asset = preferred_asset(
         [
@@ -342,6 +345,145 @@ def validate_updater() -> None:
     )
     if sys.platform.startswith("win") and (not asset or not str(asset.get("name")).endswith(".msi")):
         raise RuntimeError("Windows updater did not prefer MSI")
+    expected_digest = "a" * 64
+    release = _update_info_from_payload(
+        {
+            "tag_name": "v3.0.3",
+            "html_url": "https://github.com/Kevin-kaiquan/SciPlot/releases/tag/v3.0.3",
+            "assets": [
+                {
+                    "name": "SciPlot-Windows-x64.msi",
+                    "browser_download_url": "https://github.com/Kevin-kaiquan/SciPlot/releases/download/v3.0.3/SciPlot-Windows-x64.msi",
+                    "size": 1234,
+                    "digest": f"sha256:{expected_digest}",
+                }
+            ],
+        },
+        "3.0.2",
+    )
+    if sys.platform.startswith("win") and (
+        release is None
+        or release.version != "3.0.3"
+        or release.asset_size != 1234
+        or release.asset_sha256 != expected_digest
+    ):
+        raise RuntimeError("GitHub release metadata was not normalized")
+
+    original_api = updater._fetch_api_payload
+    original_redirect = updater._fetch_release_redirect
+    try:
+        def fail_api() -> dict[str, object]:
+            raise TimeoutError("simulated API timeout")
+
+        updater._fetch_api_payload = fail_api
+        updater._fetch_release_redirect = lambda _current: UpdateInfo(
+            version="3.0.3",
+            release_url="https://github.com/Kevin-kaiquan/SciPlot/releases/tag/v3.0.3",
+        )
+        if updater.fetch_latest_release("3.0.2").version != "3.0.3":  # type: ignore[union-attr]
+            raise RuntimeError("Releases-page fallback did not recover an API failure")
+        updater._fetch_release_redirect = lambda _current: (_ for _ in ()).throw(TimeoutError("simulated fallback timeout"))
+        try:
+            updater.fetch_latest_release("3.0.2")
+        except UpdateCheckError as exc:
+            if "could not reach GitHub" not in str(exc) or "timed out" in str(exc):
+                raise RuntimeError("Update check did not provide a stable user-facing error") from exc
+        else:
+            raise RuntimeError("Update check swallowed all network failures")
+    finally:
+        updater._fetch_api_payload = original_api
+        updater._fetch_release_redirect = original_redirect
+
+    payload = b"packaged-update-content"
+    prefix = payload[:7]
+    expected_hash = hashlib.sha256(payload).hexdigest()
+
+    class FakeResponse(io.BytesIO):
+        def __init__(self, content: bytes) -> None:
+            super().__init__(content)
+            self.status = 206
+            self.headers = {
+                "Content-Length": str(len(content)),
+                "Content-Range": f"bytes {len(prefix)}-{len(payload) - 1}/{len(payload)}",
+            }
+
+        def getcode(self) -> int:
+            return self.status
+
+    original_open = updater._open_github_url
+    original_routes = updater._network_routes
+    try:
+        def fake_open(request: object, timeout: int, use_system_proxy: bool = True) -> FakeResponse:
+            del timeout, use_system_proxy
+            if getattr(request, "get_header")("Range") != f"bytes={len(prefix)}-":
+                raise RuntimeError("Update download did not resume its partial file")
+            return FakeResponse(payload[len(prefix) :])
+
+        updater._open_github_url = fake_open  # type: ignore[assignment]
+        updater._network_routes = lambda _short, _long: [(False, 1)]
+        with tempfile.TemporaryDirectory(dir=ROOT / "runtime") as directory:
+            destination = Path(directory) / "SciPlot-Windows-x64.msi"
+            destination.with_suffix(".msi.part").write_bytes(prefix)
+            progress: list[int] = []
+            info = UpdateInfo(
+                version="3.0.3",
+                release_url="https://github.com/Kevin-kaiquan/SciPlot/releases/tag/v3.0.3",
+                asset_name=destination.name,
+                asset_url="https://github.com/Kevin-kaiquan/SciPlot/releases/download/v3.0.3/SciPlot-Windows-x64.msi",
+                asset_size=len(payload),
+                asset_sha256=expected_hash,
+            )
+            download_update(info, destination, lambda value, _message: progress.append(value))
+            if destination.read_bytes() != payload or not progress or progress[-1] != 100:
+                raise RuntimeError("Resumable update download or checksum validation failed")
+    finally:
+        updater._open_github_url = original_open
+        updater._network_routes = original_routes
+
+    if sys.platform.startswith("win"):
+        from sciplot import main_window as main_window_module
+
+        launched: list[list[str]] = []
+
+        class FakeMessageBox:
+            class StandardButton:
+                Yes = 1
+
+            @staticmethod
+            def question(*_args: object) -> int:
+                return FakeMessageBox.StandardButton.Yes
+
+            @staticmethod
+            def critical(*_args: object) -> None:
+                raise RuntimeError("Installer launch unexpectedly failed")
+
+        class FakeTimer:
+            @staticmethod
+            def singleShot(_delay: int, callback: object) -> None:  # noqa: N802
+                callback()  # type: ignore[operator]
+
+        class DummyWindow:
+            language = "en"
+            closed = False
+
+            def close(self) -> None:
+                self.closed = True
+
+        original_message_box = main_window_module.QMessageBox
+        original_timer = main_window_module.QTimer
+        original_popen = main_window_module.subprocess.Popen
+        try:
+            main_window_module.QMessageBox = FakeMessageBox  # type: ignore[assignment]
+            main_window_module.QTimer = FakeTimer  # type: ignore[assignment]
+            main_window_module.subprocess.Popen = lambda command, **_kwargs: launched.append(command)  # type: ignore[assignment]
+            dummy = DummyWindow()
+            main_window_module.MainWindow._open_downloaded_update(dummy, Path("SciPlot-Windows-x64.msi"))  # type: ignore[arg-type]
+            if not launched or launched[0][:2] != ["msiexec.exe", "/i"] or not dummy.closed:
+                raise RuntimeError("Windows updater did not hand the MSI to msiexec before closing SciPlot")
+        finally:
+            main_window_module.QMessageBox = original_message_box
+            main_window_module.QTimer = original_timer
+            main_window_module.subprocess.Popen = original_popen
     for url in (
         "https://api.github.com/repos/Kevin-kaiquan/SciPlot/releases/latest",
         "https://github.com/Kevin-kaiquan/SciPlot/releases/download/v3.0.0/SciPlot-Windows-x64.msi",
